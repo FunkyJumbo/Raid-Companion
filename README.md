@@ -501,6 +501,15 @@ the current partition — close to FFLogs' *rank %*. During a fight it is only a
 
 <br>
 
+## About
+
+Raid Companion was first developed in another repository, under the name *DPS In Server Bar*. The project has since
+grown well beyond the server bar and taken a new direction, so for a clean naming and a fresh start it moved to this
+brand new repository. The full development history is still available in the original one:
+[FunkyJumbo/DPS-In-Server-Bar](https://github.com/FunkyJumbo/DPS-In-Server-Bar).
+
+<br>
+
 ## Credits
 
 - [Dalamud](https://github.com/goatcorp/Dalamud) and [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs).
