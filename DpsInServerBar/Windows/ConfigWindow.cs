@@ -1054,9 +1054,14 @@ public sealed class ConfigWindow : Window
         DrawPhaseHp(phase);
 
         ImGui.TableNextColumn();
-        var enrage = c.UltimateEnrageSeconds.GetValueOrDefault(phase.Key);
-        if (DrawEnrageInput(enrage, out var newEnrage))
-            SetPhaseEnrage(phase.Key, newEnrage);
+        // Without a value of the player, the built-in enrage is shown (greyed), and typing a value overrides it.
+        var builtInEnrage = c.UltimateEnrageSeconds.GetValueOrDefault(phase.Key) <= 0 && phase.BuiltInEnrage is > 0;
+        var enrage = c.PhaseEnrage(phase) ?? 0;
+        using (ImRaii.PushColor(ImGuiCol.Text, Theme.TextFaint, builtInEnrage))
+        {
+            if (DrawEnrageInput(enrage, out var newEnrage))
+                SetPhaseEnrage(phase.Key, newEnrage);
+        }
 
         ImGui.TableNextColumn();
         var phaseHp = c.PhaseCheckHp(phase.Key, 0);
@@ -1066,6 +1071,15 @@ public sealed class ConfigWindow : Window
             ImGui.TextDisabled("-");
 
         ImGui.TableNextColumn();
+        if (builtInEnrage)
+        {
+            ImGui.TextDisabled(Loc.T("built-in"));
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(Loc.T("Known enrage of this phase. Type a value to override it, clear the field to go back to it."));
+            if (tracker.LastWipes.ContainsKey(phase.Key) || tracker.LastClears.ContainsKey(phase.Key))
+                ImGui.SameLine();
+        }
+
         if (tracker.LastWipes.TryGetValue(phase.Key, out var wipe))
         {
             if (ImGui.SmallButton(Loc.F("Use last wipe ({0})",NumberFormat.Duration(wipe))))

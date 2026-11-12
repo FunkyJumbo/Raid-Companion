@@ -16,8 +16,10 @@ namespace DpsInServerBar.Ultimates;
 /// <param name="StartWhenAllTargetable">
 /// Start only once every tracked boss is targetable (several bosses arriving together), instead of the first one.
 /// </param>
+/// <param name="BuiltInEnrage">Known enrage time, in seconds from the phase start; the one entered in the settings wins.</param>
 public sealed record UltimatePhase(
-    string Key, string Label, string Name, IReadOnlyList<string> TrackedBosses, bool StartWhenAllTargetable = false)
+    string Key, string Label, string Name, IReadOnlyList<string> TrackedBosses, bool StartWhenAllTargetable = false,
+    double? BuiltInEnrage = null)
 {
     /// <summary>A transition between two boss phases: no DPS check, no enrage.</summary>
     public bool IsTransition => TrackedBosses.Count == 0;
@@ -43,6 +45,10 @@ public static class UltimateDefinitions
 
             // Brute Justice and Cruise Chaser: starts when both are targetable, both count for the check.
             new("TEA:P2", "P2", "Brute Justice & Cruise Chaser", ["Brute Justice", "Cruise Chaser"], StartWhenAllTargetable: true),
+
+            // Alexander Prime: starts when he becomes targetable after Brute Justice and Cruise Chaser die.
+            // Enrage 4:35 from the phase start; the HP is read in game the first time.
+            new("TEA:P3", "P3", "Alexander Prime", ["Alexander Prime"], BuiltInEnrage: 275),
         ]),
     ];
 

@@ -217,7 +217,7 @@ public sealed class UltimateTracker
                     var maxHpAtEnd = followed.Values.Sum(f => (double)f.MaxHp);
                     PhaseEnded?.Invoke(new PhaseResult(
                         fight, phase, phaseIndex + 1, LastClears[phase.Key], maxHpAtEnd, 0,
-                        config.UltimateEnrageSeconds.TryGetValue(phase.Key, out var phaseEnrage) && phaseEnrage > 0 ? phaseEnrage : null,
+                        config.PhaseEnrage(phase),
                         true, config.PhaseCheckHp(phase.Key, maxHpAtEnd)));
                 }
 
@@ -247,7 +247,7 @@ public sealed class UltimateTracker
             config.Save();
         }
 
-        double? enrage = config.UltimateEnrageSeconds.TryGetValue(phase.Key, out var e) && e > 0 ? e : null;
+        var enrage = config.PhaseEnrage(phase);
 
         Current = new PhaseView(
             fight, phase, phaseIndex + 1, phaseStartUtc is not null,

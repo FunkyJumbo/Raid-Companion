@@ -426,12 +426,12 @@ is tracked on its own:
 - the Enrage timer, GCD uptime, History (duration, boss HP left) and Progression (wipes per phase) follow the phases;
 - a chat summary is printed at the end of each phase.
 
-Enter each phase's enrage time once, or take it from your last wipe in one click. The combined HP of each phase's
-bosses is read in game the first time the phase is reached and shown in the DPS check tab with the required DPS (it can
-be overridden by hand).
+Enter each phase's enrage time once, or take it from your last wipe in one click (some phases come with their enrage
+built in, shown greyed until you enter your own). The combined HP of each phase's bosses is read in game the first
+time the phase is reached and shown in the DPS check tab with the required DPS (it can be overridden by hand).
 
-Supported so far: **The Epic of Alexander — P1 (Living Liquid), Limit Cut (transition) and P2 (Brute Justice & Cruise
-Chaser)**. More phases and ultimates will be added one at a time.
+Supported so far: **The Epic of Alexander — P1 (Living Liquid), Limit Cut (transition), P2 (Brute Justice & Cruise
+Chaser) and P3 (Alexander Prime)**. More phases and ultimates will be added one at a time.
 
 <br>
 

@@ -671,5 +671,6 @@
   "{0} damage (-{1} DPS)": "{0} Schaden (-{1} DPS)",
   "Experimental estimate: your damage while the debuff was on, scaled back up by its strength. Weakness -25% and Brink of Death -50% (main stats lowered by that much).": "Experimentelle Schätzung: dein Schaden während des Debuffs, um seine Stärke hochgerechnet. Schwäche -25% und Todesnähe -50% (Hauptattribute um so viel gesenkt).",
   "(experimental)": "(experimentell)",
-  "Experimental: an estimate, the strength of Damage Down is not always known. To be checked against your logs.": "Experimentell: eine Schätzung, die Stärke von Schaden verringert ist nicht immer bekannt. Mit deinen Logs abgleichen."
+  "Experimental: an estimate, the strength of Damage Down is not always known. To be checked against your logs.": "Experimentell: eine Schätzung, die Stärke von Schaden verringert ist nicht immer bekannt. Mit deinen Logs abgleichen.",
+  "Known enrage of this phase. Type a value to override it, clear the field to go back to it.": "Bekannter Enrage dieser Phase. Gib einen Wert ein, um ihn zu überschreiben, leere das Feld, um zu ihm zurückzukehren."
 }

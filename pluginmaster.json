@@ -6,7 +6,7 @@
     "Description": "Shows your real-time DPS, party DPS or FFLogs-style rDPS in the server info bar, with your rank, role comparison, pace and enrage timer. Includes a live breakdown window, a compact party meter, graphs, pull history with comparisons, GCD analysis, gauge overcap, positionals, combo errors, DoT uptime, overheal, tank swaps, party mitigation, party deaths with their cause, failed mechanics, progression tracking, party DPS checks (built in for extremes and savage raids), an opener practice for every job and an optional FFLogs percentile estimate. Works with ACT (OverlayPlugin WebSocket) or on its own with the built-in tracker. Available in English, French and German.\n\nCommands:\n/raidcompanion (or /rcomp) - open / close the main window\n/raidcompanion config - settings\n/raidcompanion history - main window on the History tab\n/raidcompanion toggle - cycle DPS, pDPS, rDPS\n/raidcompanion compact - open / close the compact meter\n/raidcompanion opener - open / close the opener practice\n/raidcompanion opener compact - opener practice in its compact view\n/raidcompanion opener full - opener practice in its full window\n/raidcompanion preset <number|name|next> - switch the server bar preset\n/raidcompanion reconnect - reconnect to ACT",
     "RepoUrl": "https://github.com/FunkyJumbo/Raid-Companion",
     "InternalName": "DpsInServerBar",
-    "AssemblyVersion": "1.0.0.0",
+    "AssemblyVersion": "1.0.1.0",
     "DalamudApiLevel": 15,
     "ApplicableVersion": "any",
     "Tags": ["dps", "rdps", "combat", "act", "overlayplugin", "dtr", "fflogs", "parse"],
@@ -16,9 +16,9 @@
     "LoadPriority": 0,
     "IconUrl": "https://raw.githubusercontent.com/FunkyJumbo/Raid-Companion/main/DpsInServerBar/icon.png",
     "ImageUrls": [],
-    "Changelog": "",
-    "DownloadLinkInstall": "https://github.com/FunkyJumbo/Raid-Companion/releases/download/1.0.0.0/latest.zip",
-    "DownloadLinkUpdate": "https://github.com/FunkyJumbo/Raid-Companion/releases/download/1.0.0.0/latest.zip",
+    "Changelog": "- Ultimates: The Epic of Alexander P3 (Alexander Prime) is tracked, with its enrage (4:35) built in.",
+    "DownloadLinkInstall": "https://github.com/FunkyJumbo/Raid-Companion/releases/download/1.0.1.0/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/FunkyJumbo/Raid-Companion/releases/download/1.0.1.0/latest.zip",
     "DownloadLinkTesting": ""
   }
 ]

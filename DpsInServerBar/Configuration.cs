@@ -375,6 +375,10 @@ public sealed class Configuration : IPluginConfiguration
     [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
     public Dictionary<string, double> UltimateEnrageSeconds { get; set; } = new();
 
+    /// <summary>Enrage of an ultimate phase: entered by hand, else the built-in one, else null (unknown).</summary>
+    public double? PhaseEnrage(Ultimates.UltimatePhase phase) =>
+        UltimateEnrageSeconds.GetValueOrDefault(phase.Key) is > 0 and var entered ? entered : phase.BuiltInEnrage;
+
     /// <summary>Combined max HP of each phase's bosses, as last read from the game (all bosses of the phase must die).</summary>
     [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
     public Dictionary<string, double> UltimatePhaseHpDetected { get; set; } = new();
