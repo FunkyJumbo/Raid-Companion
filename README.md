@@ -28,7 +28,7 @@ opening a window. An [**opener practice**](#opener-practice) is included too.
 
 <p align="center">
   <img src="docs/images/live.png" width="720" alt="The Live tab after a pull: your cards, personal section, party table, deaths and failed mechanics"><br>
-  <sub>The Live tab after a pull (player names hidden for the screenshot).</sub>
+  <sub>The Live tab after a pull.</sub>
 </p>
 
 <br>
