@@ -1,0 +1,491 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Numerics;
+using System.Text;
+using Dalamud.Game.Gui.Dtr;
+using Dalamud.Game.Text.SeStringHandling;
+using Dalamud.Plugin.Services;
+using Dalamud.Utility;
+using DpsInServerBar.Combat;
+using DpsInServerBar.Fflogs;
+using DpsInServerBar.Tracking;
+using DpsInServerBar.Ultimates;
+
+namespace DpsInServerBar.Display;
+
+/// <summary>Owns the server info bar entry and renders the current state into it. Game thread only.</summary>
+public sealed class DtrController : IDisposable
+{
+    private const string EntryName = "Raid Companion";
+
+    private readonly Plugin plugin;
+    private readonly IDtrBarEntry entry;
+
+    // Cache of what was last written, so the bar is only touched when something actually changes.
+    private string lastKey = string.Empty;
+
+    // Last value of each element during the current fight: once the fight is over, elements that have nothing new
+    // to show (pace, ETA, enrage timer, ultimate phase values...) keep displaying it until the next fight.
+    private readonly Dictionary<BarElement, Segment> lastSegments = new();
+    private DateTime lastSegmentsFight;
+
+    private static readonly TimeSpan PreviewDuration = TimeSpan.FromSeconds(10);
+    private DateTime previewUntilUtc;
+
+    public DtrController(Plugin plugin, IDtrBar dtrBar)
+    {
+        this.plugin = plugin;
+        entry = dtrBar.Get(EntryName);
+        entry.OnClick = OnClick;
+        entry.Shown = true;
+    }
+
+    public void Dispose() => entry.Remove();
+
+    public void Update()
+    {
+        if (DateTime.UtcNow < previewUntilUtc)
+        {
+            UpdatePreview();
+            return;
+        }
+
+        var source = plugin.Sources.Current;
+        var snapshot = plugin.Sources.Latest;
+
+        var state = BuildState(source, snapshot);
+        var key = $"{state.Key}|{source.Name}|{source.StatusText}";
+        if (key == lastKey)
+            return;
+
+        lastKey = key;
+        entry.Shown = state.Visible;
+        entry.Text = state.Text;
+        entry.Tooltip = BuildTooltip(source, snapshot);
+    }
+
+    /// <summary>Forces the next <see cref="Update"/> to redraw (e.g. after a config change).</summary>
+    public void Invalidate() => lastKey = string.Empty;
+
+    /// <summary>Shows placeholder values for every enabled element for a few seconds, to check the layout.</summary>
+    public void StartPreview()
+    {
+        previewUntilUtc = DateTime.UtcNow + PreviewDuration;
+        Invalidate();
+    }
+
+    public void StopPreview()
+    {
+        previewUntilUtc = DateTime.MinValue;
+        Invalidate();
+    }
+
+    public TimeSpan PreviewLeft => previewUntilUtc > DateTime.UtcNow ? previewUntilUtc - DateTime.UtcNow : TimeSpan.Zero;
+
+    private void UpdatePreview()
+    {
+        var config = plugin.Configuration;
+        var segments = config.BarLayout.Where(e => e.Enabled).Select(e => PreviewSegment(e.Element, config)).ToList();
+        var key = "preview|" + string.Join("|", segments.Select(s => $"{s.Text}{s.Icon}{s.Color}")) + $"|{config.BarSeparator}";
+        if (key == lastKey)
+            return;
+
+        lastKey = key;
+        entry.Shown = true;
+        entry.Text = Render(segments, null, config.BarSeparator);
+        entry.Tooltip = Loc.T("Preview: placeholder values for the elements ticked in the settings.");
+    }
+
+    /// <summary>Example value of each element, colored like in a fight going well.</summary>
+    private Segment PreviewSegment(BarElement element, Configuration config)
+    {
+        Vector4? good = config.UseColors ? config.AboveThresholdColor : null;
+        var job = plugin.Sources.Latest?.You is { HasJob: true } you ? you.Job : "DRK";
+        var label = MetricLabel(config.Metric);
+        return element switch
+        {
+            BarElement.Rank => new Segment("#2"),
+            BarElement.RoleGap => new Segment("#1 (+8%)", Color: good),
+            BarElement.Value => config.Metric switch
+            {
+                DisplayMetric.Party => new Segment($"{NumberFormat.Format(182_345, config.NumberStyle)} {label} (+3.2%)", Color: good),
+                DisplayMetric.Raid => new Segment($"{NumberFormat.Format(20_511, config.NumberStyle)} {label}"),
+                _ => new Segment($"{NumberFormat.Format(21_234, config.NumberStyle)} {label}"),
+            },
+            BarElement.Pace => new Segment(Loc.T("Best +4%")),
+            BarElement.EnrageTimer => new Segment(Loc.T("Enrage 1:12")),
+            BarElement.Phase => new Segment("P2"),
+            BarElement.PhaseDps => new Segment(Loc.F("Boss {0} (+3.6%)",NumberFormat.Format(145_000, config.NumberStyle)), Color: good),
+            BarElement.Uptime => new Segment(Loc.T("GCD 98.7%")),
+            BarElement.Duration => new Segment("3:42"),
+            BarElement.DotUptime => new Segment(Loc.T("DoT 97.1%")),
+            BarElement.Percentile => new Segment("~87", Color: config.UseColors ? FflogsNames.Color(87) : null),
+            _ => new Segment(element.ToString()),
+        };
+    }
+
+    private void OnClick(DtrInteractionEvent e)
+    {
+        switch (e.ClickType)
+        {
+            case MouseClickType.Left:
+                plugin.ToggleMetric();
+                break;
+            case MouseClickType.Right:
+                plugin.ToggleMainUi();
+                break;
+        }
+    }
+
+    private readonly record struct RenderState(string Key, bool Visible, SeString Text);
+
+    /// <summary>A piece of the bar: some text or an icon, with an optional color of its own.</summary>
+    /// <param name="Glue">Followed by a plain space instead of the separator (the icon and the end marker belong to what follows).</param>
+    private readonly record struct Segment(string Text, BitmapFontIcon Icon = BitmapFontIcon.None, Vector4? Color = null, bool Glue = false);
+
+    private RenderState BuildState(ICombatSource source, CombatSnapshot? snapshot)
+    {
+        var config = plugin.Configuration;
+        var label = MetricLabel(config.Metric);
+
+        if (!source.IsReady && snapshot is null)
+        {
+            var text = $"{source.Name} × {label}";
+            return new RenderState("disc|" + label, !config.HideWhenDisconnected,
+                                   Render([new Segment(text)], config.UseColors ? config.FinalColor : null));
+        }
+
+        if (snapshot is null)
+            return new RenderState("idle|" + label, true, Render([new Segment($"- {label}")], null));
+
+        var ended = !snapshot.IsActive;
+        if (ended && config.HideAfterSeconds > 0
+                  && (DateTime.UtcNow - snapshot.ReceivedAtUtc).TotalSeconds >= config.HideAfterSeconds)
+        {
+            return new RenderState("hidden", false, new SeString());
+        }
+
+        var partyDps = snapshot.PartyDps(config.IncludeLimitBreakInParty);
+        double? value = config.Metric switch
+        {
+            DisplayMetric.Party => partyDps,
+            DisplayMetric.Raid => snapshot.You is { HasRdps: true } r ? r.RDps : null,
+            _ => snapshot.You?.EncDps ?? 0,
+        };
+
+        var threshold = config.FindThreshold(plugin.CurrentTerritory, snapshot.Encounter.Title, plugin.Boss.Current?.BaseId ?? 0);
+        var boss = plugin.Boss.Current;
+
+        if (snapshot.StartUtc != lastSegmentsFight)
+        {
+            lastSegments.Clear();
+            lastSegmentsFight = snapshot.StartUtc;
+        }
+
+        var segments = new List<Segment>();
+        foreach (var element in config.BarLayout.Where(e => e.Enabled).Select(e => e.Element))
+        {
+            var segment = BuildSegment(element, config, snapshot, value, label, ended, partyDps, threshold, boss);
+            if (segment is { } s)
+            {
+                if (!ended)
+                    lastSegments[element] = s;
+                segments.Add(s);
+            }
+            else if (ended && lastSegments.TryGetValue(element, out var last))
+            {
+                segments.Add(last);
+            }
+        }
+
+        // The main color: grey once the fight is over. The party DPS check only colors the pDPS value (see Value).
+        Vector4? color = config.UseColors && ended ? config.FinalColor : null;
+
+        var key = string.Join("|", segments.Select(s => $"{s.Text}{s.Icon}{s.Color}")) + $"|{color}";
+        return new RenderState(key, true, Render(segments, color, config.BarSeparator));
+    }
+
+    private Segment? BuildSegment(
+        BarElement element, Configuration config, CombatSnapshot snapshot, double? value, string label, bool ended,
+        double partyDps, PartyDpsThreshold? threshold, BossInfo? boss)
+    {
+        var you = snapshot.You;
+        switch (element)
+        {
+            case BarElement.Rank:
+                // The rank only makes sense for your own (r)DPS, and when there is someone to compare to.
+                if (config.Metric == DisplayMetric.Party || snapshot.Combatants.Count(c => c.HasJob) < 2)
+                    return null;
+                var rank = snapshot.YourRank(byRdps: config.Metric == DisplayMetric.Raid);
+                return rank > 0 ? new Segment($"#{rank}") : null;
+
+            case BarElement.RoleGap:
+                if (config.Metric == DisplayMetric.Party
+                    || snapshot.YourRoleStanding(byRdps: config.Metric == DisplayMetric.Raid) is not { Count: > 1, Gap: { } gap } standing)
+                {
+                    return null;
+                }
+
+                Vector4? gapColor = config.UseColors ? (gap >= 0 ? config.AboveThresholdColor : config.BelowThresholdColor) : null;
+                return new Segment($"#{standing.Rank} ({gap:+0%;-0%})", Color: gapColor);
+
+            case BarElement.Value:
+            {
+                // rDPS needs the built-in tracker: show a dash rather than a wrong number when it has nothing.
+                var text = $"{(value is { } v ? NumberFormat.Format(v, config.NumberStyle) : "-")} {label}";
+
+                // pDPS with a DPS check: gap to the required DPS, and only this value turns green / red.
+                if (config.Metric == DisplayMetric.Party && threshold is { EffectiveMinPartyDps: > 0 } check && value is > 0 and var pdps)
+                {
+                    var required = check.EffectiveMinPartyDps;
+                    Vector4? checkColor = config.UseColors
+                                              ? pdps < required ? config.BelowThresholdColor : config.AboveThresholdColor
+                                              : null;
+                    return new Segment($"{text} ({pdps / required - 1:+0.0%;-0.0%})", Color: checkColor);
+                }
+
+                return new Segment(text);
+            }
+
+            case BarElement.Pace:
+                return !ended && plugin.Pulls.PaceVsBest() is { } pace ? new Segment(Loc.F("Best {0:+0%;-0%}",pace)) : null;
+
+            case BarElement.Uptime:
+            {
+                if (plugin.Uptime.Snapshot() is not { AvailableSeconds: >= 5 } up)
+                    return null;
+
+                // In an ultimate, the uptime of the phase being fought.
+                var uptime = plugin.Ultimates.Current is { Started: true } upPhase
+                             && up.Phases.FirstOrDefault(p => p.Number == upPhase.Number) is { } phaseUptime
+                                 ? phaseUptime.Uptime
+                                 : up.Uptime;
+                return new Segment(Loc.F("GCD {0:0.0%}",uptime));
+            }
+
+            case BarElement.DotUptime:
+            {
+                // Jobs with a DoT only, once the boss has been attackable a few seconds. Several DoTs: each one.
+                var dots = plugin.Dots.Current;
+                if (dots.Count == 0 || dots[0].AvailableSeconds < 5)
+                    return null;
+                return new Segment(Loc.F("DoT {0}", string.Join(" / ", dots.Select(d => d.Uptime.ToString("0.0%", System.Globalization.CultureInfo.CurrentCulture)))));
+            }
+
+            case BarElement.PhaseDps:
+            {
+                // Ultimates: DPS on the bosses of the current phase only (adds and other bosses excluded).
+                if (ActivePhase() is not { BossDps: > 0 } dpsPhase)
+                    return null;
+
+                var text = Loc.F("Boss {0}",NumberFormat.Format(dpsPhase.BossDps, config.NumberStyle));
+                if (dpsPhase.RequiredDps is not { } required)
+                    return new Segment(text);
+
+                Vector4? phaseColor = config.UseColors
+                                          ? dpsPhase.BossDps < required ? config.BelowThresholdColor : config.AboveThresholdColor
+                                          : null;
+                return new Segment($"{text} ({dpsPhase.BossDps / required - 1:+0.0%;-0.0%})", Color: phaseColor);
+            }
+
+            case BarElement.Phase:
+                return plugin.Ultimates.Current is { } phaseView ? new Segment(phaseView.Label) : null;
+
+            case BarElement.EnrageTimer:
+            {
+                if (InTransition())
+                    return null;
+
+                double? left = null;
+                if (ActivePhase() is { } enragePhase)
+                    left = enragePhase.EnrageIn?.TotalSeconds;
+                else if (!ended && threshold is { EnrageSeconds: > 0 })
+                    left = threshold.EnrageSeconds - snapshot.Encounter.Duration.TotalSeconds;
+
+                if (left is not { } seconds)
+                    return null;
+
+                // Counts down from the enrage time entered by hand; red for the last 30 seconds.
+                Vector4? enrageColor = config.UseColors && seconds <= 30 ? config.BelowThresholdColor : null;
+                return new Segment(
+                    seconds > 0 ? Loc.F("Enrage {0}",NumberFormat.Duration(TimeSpan.FromSeconds(Math.Ceiling(seconds)))) : Loc.T("Enrage!"),
+                    Color: enrageColor);
+            }
+
+            case BarElement.Duration:
+                return new Segment(NumberFormat.Duration(snapshot.Encounter.Duration));
+
+            case BarElement.Percentile:
+                return plugin.EstimatePercentile(snapshot) is { } pct
+                           ? new Segment($"~{pct:0}", Color: config.UseColors ? FflogsNames.Color(pct) : null)
+                           : null;
+
+            default:
+                return null;
+        }
+    }
+
+    private static void AppendPhase(StringBuilder sb, PhaseView phase, Configuration config)
+    {
+        sb.Append($"\n{phase.Fight.Key} - {phase.Label}");
+        if (!phase.Supported)
+        {
+            sb.Append(Loc.T(": phase not supported yet"));
+            return;
+        }
+
+        if (!phase.IsTransition)
+            sb.Append($" {phase.Phase!.Name}");
+        if (!phase.Started)
+        {
+            sb.Append(phase.InCombat ? Loc.T(" (waiting for the boss)") : string.Empty);
+            return;
+        }
+
+        sb.Append($"  {NumberFormat.Duration(phase.Elapsed)}{(phase.InCombat ? "" : Loc.T(" (pull ended)"))}");
+        if (phase.IsTransition)
+            return; // no boss to follow until the next phase
+        sb.Append(Loc.F("\nBoss HP: {0:0.0%} ({1}",phase.HpFraction,NumberFormat.Format(phase.CurrentHp, NumberStyle.Compact))
+                  + $" / {NumberFormat.Format(phase.MaxHp, NumberStyle.Compact)})");
+        sb.Append(Loc.F("\nDPS on boss: {0}",NumberFormat.Format(phase.BossDps, config.NumberStyle)));
+        if (phase.RequiredDps is { } required)
+            sb.Append(Loc.F("  (need {0})",NumberFormat.Format(required, config.NumberStyle)));
+
+        if (phase.InCombat && phase.ProjectedKill is { } eta)
+            sb.Append(Loc.F("\nProjected kill: {0}",NumberFormat.Duration(eta)));
+        if (phase.EnrageSeconds is { } enrage)
+            sb.Append(Loc.F("  (enrage {0})",NumberFormat.Duration(TimeSpan.FromSeconds(enrage))));
+    }
+
+    /// <summary>The ultimate phase being fought, when its bosses are up.</summary>
+    private PhaseView? ActivePhase() =>
+        plugin.Ultimates.Current is { Supported: true, Started: true, InCombat: true, IsTransition: false } phase ? phase : null;
+
+    /// <summary>During an ultimate transition there is no boss to follow: boss HP, ETA and enrage are hidden.</summary>
+    private bool InTransition() => plugin.Ultimates.Current is { IsTransition: true, InCombat: true };
+
+    private static string MetricLabel(DisplayMetric metric) => metric switch
+    {
+        DisplayMetric.Party => Loc.T("pDPS"),
+        DisplayMetric.Raid => Loc.T("rDPS"),
+        _ => Loc.T("DPS"),
+    };
+
+    private static SeString Render(IReadOnlyList<Segment> segments, Vector4? color, string separator = " ")
+    {
+        var builder = new Lumina.Text.SeStringBuilder();
+        for (var i = 0; i < segments.Count; i++)
+        {
+            var s = segments[i];
+            if (i > 0)
+                builder.Append(segments[i - 1].Glue ? " " : separator);
+
+            if (s.Icon != BitmapFontIcon.None)
+            {
+                builder.AppendIcon((uint)s.Icon);
+                continue;
+            }
+
+            if ((s.Color ?? color) is { } c)
+                builder.PushColorRgba(c).Append(s.Text).PopColor();
+            else
+                builder.Append(s.Text);
+        }
+
+        return builder.ToReadOnlySeString().ToDalamudString();
+    }
+
+    private SeString BuildTooltip(ICombatSource source, CombatSnapshot? snapshot)
+    {
+        var config = plugin.Configuration;
+        var sb = new StringBuilder();
+        sb.Append(source.Name).Append(": ").Append(source.StatusText);
+
+        if (snapshot is not null)
+        {
+            var enc = snapshot.Encounter;
+            sb.Append('\n').Append(string.IsNullOrEmpty(enc.Title) ? Loc.T("Encounter") : enc.Title)
+              .Append(" - ").Append(NumberFormat.Duration(enc.Duration))
+              .Append(snapshot.IsActive ? "" : Loc.T(" (ended)"));
+
+            if (snapshot.You is { } you)
+            {
+                var party = snapshot.Combatants.Count(c => c.HasJob);
+                sb.Append(Loc.F("\nYou: {0} DPS",NumberFormat.Format(you.EncDps, config.NumberStyle)));
+                if (party > 1)
+                    sb.Append($"  (#{snapshot.YourRank()}/{party})");
+                if (you.HasRdps)
+                {
+                    sb.Append(Loc.F("\nrDPS: {0}",NumberFormat.Format(you.RDps, config.NumberStyle)));
+                    if (party > 1)
+                        sb.Append($"  (#{snapshot.YourRank(byRdps: true)}/{party})");
+                }
+
+                sb.Append(Loc.F("\nCrit {0:0}%  DH {1:0}%  CDH {2:0}%",you.CritPercent,you.DirectHitPercent,you.CritDirectHitPercent));
+                if (you.Deaths > 0)
+                    sb.Append(Loc.F("  Deaths {0}",you.Deaths));
+            }
+
+            var byRdps = config.Metric == DisplayMetric.Raid;
+            if (snapshot.YourRoleStanding(byRdps) is { Count: > 1, Gap: { } roleGap } role)
+            {
+                var vs = role.Rank == 1 ? "#2" : "#1";
+                sb.Append(Loc.F("\nAmong {0}{1}: ",JobRoles.Label(role.Role),(byRdps ? Loc.T(" (rDPS)") : ""))
+                          + Loc.F("#{0}/{1} ({2:+0.0%;-0.0%} vs {3})",role.Rank,role.Count,roleGap,vs));
+            }
+
+            var partyDps = snapshot.PartyDps(config.IncludeLimitBreakInParty);
+            sb.Append(Loc.F("\nParty: {0} DPS",NumberFormat.Format(partyDps, config.NumberStyle)));
+            var check = config.FindThreshold(plugin.CurrentTerritory, enc.Title, plugin.Boss.Current?.BaseId ?? 0);
+            if (check is not null)
+                sb.Append(Loc.F("  (check {0})",NumberFormat.Format(check.EffectiveMinPartyDps, config.NumberStyle)));
+
+            if (plugin.Ultimates.Current is { } phase)
+            {
+                // In an ultimate, the phase replaces the fight-wide boss and enrage lines.
+                AppendPhase(sb, phase, config);
+            }
+            else if (plugin.Boss.Current is { } boss)
+            {
+                sb.Append($"\n{boss.Name}: {boss.HpFraction:0.0%} ({NumberFormat.Format(boss.CurrentHp, NumberStyle.Compact)}"
+                          + $" / {NumberFormat.Format(boss.MaxHp, NumberStyle.Compact)})");
+                if (snapshot.IsActive && BossTracker.ProjectedKill(boss, enc.Duration, partyDps) is { } eta)
+                {
+                    sb.Append(Loc.F("\nProjected kill: {0}",NumberFormat.Duration(eta)));
+                    if (check is { EnrageSeconds: > 0 })
+                        sb.Append(Loc.F("  (enrage {0})",NumberFormat.Duration(TimeSpan.FromSeconds(check.EnrageSeconds))));
+                }
+            }
+
+            if (plugin.Ultimates.Current is null && snapshot.IsActive && check is { EnrageSeconds: > 0 })
+            {
+                var left = check.EnrageSeconds - enc.Duration.TotalSeconds;
+                sb.Append(left > 0
+                              ? Loc.F("\nEnrage in {0}",NumberFormat.Duration(TimeSpan.FromSeconds(Math.Ceiling(left))))
+                              : Loc.T("\nEnrage time reached"));
+            }
+
+            if (plugin.Uptime.Snapshot() is { AvailableSeconds: >= 5 } gcd)
+            {
+                sb.Append(Loc.F("\nGCD uptime: {0:0.0%} (lost {1:0.0}s)",gcd.Uptime,gcd.LostSeconds));
+                if (gcd.Phases.Count > 0)
+                    sb.Append("\n  " + string.Join(" | ", gcd.Phases.Select(p => $"{UltimateDefinitions.Label(plugin.CurrentTerritory, p.Number)} {p.Uptime:0.0%}")));
+            }
+
+            if (plugin.Dots.Current is { Count: > 0 } dots && dots[0].AvailableSeconds >= 5)
+                sb.Append(Loc.F("\nDoT uptime: {0}",string.Join(" | ", dots.Select(d => $"{d.Name} {d.Uptime:0.0%}"))));
+
+            if (plugin.EstimatePercentile(snapshot) is { } percentile)
+                sb.Append(Loc.F("\nFFLogs percentile (estimate): ~{0:0}",percentile));
+
+            if (plugin.History.BestFor(enc.Title) is { } best)
+                sb.Append(Loc.F("\nYour best here: {0} DPS",NumberFormat.Format(best.YourDps, config.NumberStyle)));
+            if (plugin.Pulls.PaceVsBest() is { } pace && snapshot.IsActive)
+                sb.Append(Loc.F("  (pace {0:+0.0%;-0.0%})",pace));
+        }
+
+        sb.Append(Loc.T("\n\nLeft click: DPS / pDPS / rDPS | Right click: details"));
+        return new SeString().Append(sb.ToString());
+    }
+}

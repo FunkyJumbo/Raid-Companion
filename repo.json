@@ -1,0 +1,7 @@
+{
+  "Name": "FunkyJumbo Plugins",
+  "Author": "FunkyJumbo",
+  "Description": "Third-party repo hosting Raid Companion",
+  "RepoUrl": "https://github.com/FunkyJumbo/Raid-Companion",
+  "ManifestUrl": "https://raw.githubusercontent.com/FunkyJumbo/Raid-Companion/main/pluginmaster.json"
+}

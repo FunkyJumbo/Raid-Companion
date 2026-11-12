@@ -1,0 +1,294 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Dalamud.Game;
+using Dalamud.Game.ClientState.Conditions;
+using Dalamud.Game.ClientState.Objects.Types;
+using Dalamud.Plugin.Services;
+using Lumina.Excel.Sheets;
+
+namespace DpsInServerBar.Ultimates;
+
+/// <summary>State of the current ultimate phase, for display.</summary>
+public sealed record PhaseView(
+    UltimateFight Fight,
+    UltimatePhase? Phase,
+    int Number,
+    bool Started,
+    TimeSpan Elapsed,
+    double CurrentHp,
+    double MaxHp,
+    double? EnrageSeconds,
+    bool InCombat,
+    double CheckHp = 0)
+{
+    /// <summary>False past the last phase defined for this ultimate.</summary>
+    public bool Supported => Phase is not null;
+
+    /// <summary>"P1", "Limit Cut"...</summary>
+    public string Label => Phase?.Label ?? $"P{Number}";
+
+    public bool IsTransition => Phase?.IsTransition == true;
+
+    public double HpFraction => MaxHp > 0 ? CurrentHp / MaxHp : 0;
+
+    /// <summary>Damage actually dealt to the tracked bosses per second since the phase started.</summary>
+    public double BossDps => Elapsed.TotalSeconds > 1 ? (MaxHp - CurrentHp) / Elapsed.TotalSeconds : 0;
+
+    /// <summary>
+    /// DPS on the tracked bosses needed to kill them before the enrage, from the phase HP of the Ultimates tab
+    /// (<see cref="CheckHp"/>: combined HP of all its bosses) or, failing that, the HP seen so far.
+    /// </summary>
+    public double? RequiredDps => PhaseHp.Required(CheckHp > 0 ? CheckHp : MaxHp, EnrageSeconds);
+
+    /// <summary>Phase time at which the bosses die at the current boss DPS.</summary>
+    public TimeSpan? ProjectedKill => BossDps > 0 ? Elapsed + TimeSpan.FromSeconds(CurrentHp / BossDps) : null;
+
+    public TimeSpan? EnrageIn => EnrageSeconds is > 0 ? TimeSpan.FromSeconds(EnrageSeconds.Value) - Elapsed : null;
+}
+
+/// <summary>How an ultimate phase ended: cleared (its bosses died or the next phase started) or not (the pull ended).</summary>
+public sealed record PhaseResult(
+    UltimateFight Fight, UltimatePhase Phase, int Number, TimeSpan Elapsed, double MaxHp, double HpLeft,
+    double? EnrageSeconds, bool Cleared, double CheckHp = 0)
+{
+    public double BossDps => Elapsed.TotalSeconds > 1 ? (MaxHp - HpLeft) / Elapsed.TotalSeconds : 0;
+    public double? RequiredDps => PhaseHp.Required(CheckHp > 0 ? CheckHp : MaxHp, EnrageSeconds);
+}
+
+internal static class PhaseHp
+{
+    public static double? Required(double hp, double? enrageSeconds) =>
+        enrageSeconds is > 0 && hp > 0 ? hp / enrageSeconds : null;
+}
+
+/// <summary>
+/// Follows the phases of the supported ultimates: each phase has its own timer, boss HP and enrage,
+/// independent from the overall fight timer. Game thread only.
+/// </summary>
+public sealed class UltimateTracker
+{
+    // A boss can disappear briefly (jumps, cutscenes): only end the phase if it stays gone that long.
+    private static readonly TimeSpan GoneDelay = TimeSpan.FromSeconds(3);
+
+    private readonly Configuration config;
+    private readonly IObjectTable objectTable;
+    private readonly ICondition condition;
+    private readonly IClientState clientState;
+    // Per phase, the name ids of each tracked boss (one set per boss name).
+    private readonly Dictionary<string, List<HashSet<uint>>> nameIdsByPhase = new();
+
+    private bool wasInCombat;
+    private int phaseIndex;
+    private DateTime? phaseStartUtc;
+    private DateTime lastAliveUtc;
+    // Per boss of the phase (index in its TrackedBosses), the object followed: the first one seen targetable, and its
+    // max HP. Invisible copies of a boss (never targetable) are common in ultimates, and fresh copies can show up later
+    // (full HP, e.g. for the enrage): they neither count for the HP nor keep the phase alive. Another copy is only
+    // followed once the first one is gone.
+    private readonly Dictionary<int, (ulong Object, uint MaxHp)> followed = new();
+
+    public UltimateTracker(Configuration config, IObjectTable objectTable, ICondition condition, IClientState clientState,
+                           IDataManager dataManager)
+    {
+        this.config = config;
+        this.objectTable = objectTable;
+        this.condition = condition;
+        this.clientState = clientState;
+
+        // Boss names -> every BNpcName row with that English name (a boss can exist in several fights).
+        var names = dataManager.GetExcelSheet<BNpcName>(ClientLanguage.English)
+                               .Select(r => (r.RowId, Name: r.Singular.ExtractText()))
+                               .Where(r => r.Name.Length > 0)
+                               .ToList();
+        foreach (var phase in UltimateDefinitions.All.SelectMany(f => f.Phases))
+        {
+            nameIdsByPhase[phase.Key] = phase.TrackedBosses
+                .Select(boss => names.Where(n => n.Name.Equals(boss, StringComparison.OrdinalIgnoreCase))
+                                     .Select(n => n.RowId)
+                                     .ToHashSet())
+                .ToList();
+        }
+    }
+
+    /// <summary>The current phase, or null outside a supported ultimate (or when the mode is off).</summary>
+    public PhaseView? Current { get; private set; }
+
+    /// <summary>Phase time when the last pull ended before clearing the phase (e.g. a wipe to the enrage).</summary>
+    public Dictionary<string, TimeSpan> LastWipes { get; } = new();
+
+    /// <summary>Phase time of the last clear of each phase.</summary>
+    public Dictionary<string, TimeSpan> LastClears { get; } = new();
+
+    /// <summary>Raised when a phase ends, cleared or not (for the phase chat summary).</summary>
+    public event Action<PhaseResult>? PhaseEnded;
+
+    public static UltimateFight? FightFor(uint territory) =>
+        UltimateDefinitions.All.FirstOrDefault(f => f.TerritoryId == territory);
+
+    public void Update()
+    {
+        var fight = config.UltimateMode ? FightFor(clientState.TerritoryType) : null;
+        if (fight is null)
+        {
+            Current = null;
+            wasInCombat = false;
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var inCombat = condition[ConditionFlag.InCombat];
+
+        if (inCombat && !wasInCombat)
+        {
+            phaseIndex = 0;
+            ResetPhase();
+        }
+        else if (!inCombat && wasInCombat && phaseStartUtc is { } start && phaseIndex < fight.Phases.Count)
+        {
+            // The pull ended during this phase.
+            LastWipes[fight.Phases[phaseIndex].Key] = now - start;
+            if (Current is { Supported: true, Started: true, Phase.IsTransition: false } last)
+                PhaseEnded?.Invoke(new PhaseResult(fight, last.Phase!, last.Number, now - start, last.MaxHp, last.CurrentHp, last.EnrageSeconds, false, last.CheckHp));
+        }
+
+        wasInCombat = inCombat;
+
+        if (!inCombat)
+        {
+            // Keep showing where the last pull ended.
+            if (Current is not null)
+                Current = Current with { InCombat = false };
+            return;
+        }
+
+        // Once the whole party is dead, the bosses despawn or reset: nothing that happens then is a new phase, and the
+        // phase keeps the HP it had when the party died.
+        if (PartyWiped())
+            return;
+
+        if (phaseIndex >= fight.Phases.Count)
+        {
+            Current = new PhaseView(fight, null, phaseIndex + 1, false, TimeSpan.Zero, 0, 0, null, true);
+            return;
+        }
+
+        var phase = fight.Phases[phaseIndex];
+        var npcs = objectTable.OfType<IBattleNpc>().ToList();
+
+        if (phaseStartUtc is null && HasStarted(phase, npcs))
+        {
+            phaseStartUtc = now;
+            lastAliveUtc = now;
+        }
+
+        // One object per boss of this phase (see followed).
+        var groups = nameIdsByPhase[phase.Key];
+        var present = npcs.Select(n => n.GameObjectId).ToHashSet();
+        foreach (var b in npcs.Where(n => n.IsTargetable && n.MaxHp > 0))
+        {
+            var group = groups.FindIndex(set => set.Contains(b.NameId));
+            if (group < 0)
+                continue;
+            if (followed.TryGetValue(group, out var known) && known.Object != b.GameObjectId && present.Contains(known.Object))
+                continue;
+            followed[group] = (b.GameObjectId, Math.Max(known.Object == b.GameObjectId ? known.MaxHp : 0, b.MaxHp));
+        }
+
+        var followedObjects = followed.Values.Select(f => f.Object).ToHashSet();
+        var bosses = npcs.Where(n => followedObjects.Contains(n.GameObjectId)).ToList();
+        var alive = bosses.Where(b => !b.IsDead && b.CurrentHp > 0).ToList();
+
+        if (phaseStartUtc is { } phaseStart)
+        {
+            if (alive.Count > 0)
+                lastAliveUtc = now;
+
+            // Any phase ends when the next boss phase starts (transitions in between are skipped); a boss phase
+            // also ends when its bosses are dead (or gone for good), which leads into the following transition.
+            var nextBoss = NextBossPhase(fight, phaseIndex);
+            var nextStarted = nextBoss is { } nb && HasStarted(fight.Phases[nb], npcs);
+            var bossesGone = !phase.IsTransition && alive.Count == 0 && (bosses.Count > 0 || now - lastAliveUtc > GoneDelay);
+            if (nextStarted || bossesGone)
+            {
+                if (!phase.IsTransition)
+                {
+                    LastClears[phase.Key] = (nextStarted ? now : lastAliveUtc) - phaseStart;
+                    var maxHpAtEnd = followed.Values.Sum(f => (double)f.MaxHp);
+                    PhaseEnded?.Invoke(new PhaseResult(
+                        fight, phase, phaseIndex + 1, LastClears[phase.Key], maxHpAtEnd, 0,
+                        config.UltimateEnrageSeconds.TryGetValue(phase.Key, out var phaseEnrage) && phaseEnrage > 0 ? phaseEnrage : null,
+                        true, config.PhaseCheckHp(phase.Key, maxHpAtEnd)));
+                }
+
+                phaseIndex = nextStarted ? nextBoss!.Value : phaseIndex + 1;
+                ResetPhase();
+
+                // The new phase starts now if its bosses are already up, or if it is a transition.
+                if (nextStarted || (phaseIndex < fight.Phases.Count && fight.Phases[phaseIndex].IsTransition))
+                {
+                    phaseStartUtc = now;
+                    lastAliveUtc = now;
+                }
+
+                return;
+            }
+        }
+
+        var maxHp = followed.Values.Sum(f => (double)f.MaxHp);
+        // Bosses out of sight for a moment (jump, despawn): keep the HP last seen.
+        var currentHp = bosses.Count > 0 ? alive.Sum(b => (double)b.CurrentHp)
+                        : Current is { } seen && seen.Number == phaseIndex + 1 ? seen.CurrentHp : 0;
+
+        // Remember the combined HP of the phase's bosses, for the Ultimates tab and the next pulls.
+        if (phaseStartUtc is not null && maxHp > config.UltimatePhaseHpDetected.GetValueOrDefault(phase.Key))
+        {
+            config.UltimatePhaseHpDetected[phase.Key] = maxHp;
+            config.Save();
+        }
+
+        double? enrage = config.UltimateEnrageSeconds.TryGetValue(phase.Key, out var e) && e > 0 ? e : null;
+
+        Current = new PhaseView(
+            fight, phase, phaseIndex + 1, phaseStartUtc is not null,
+            phaseStartUtc is { } s ? now - s : TimeSpan.Zero, currentHp, maxHp, enrage, true, config.PhaseCheckHp(phase.Key, maxHp));
+    }
+
+    /// <summary>Index of the first boss phase after the given one (transitions skipped), or null.</summary>
+    private static int? NextBossPhase(UltimateFight fight, int index)
+    {
+        for (var i = index + 1; i < fight.Phases.Count; i++)
+        {
+            if (!fight.Phases[i].IsTransition)
+                return i;
+        }
+
+        return null;
+    }
+
+    /// <summary>Whether a phase's bosses are up: the first one, or all of them for a multi-boss phase.</summary>
+    private bool HasStarted(UltimatePhase phase, List<IBattleNpc> npcs)
+    {
+        if (phase.IsTransition)
+            return false; // a transition starts when the previous phase ends
+
+        bool Up(HashSet<uint> ids) => npcs.Any(n => ids.Contains(n.NameId) && n.IsTargetable && !n.IsDead && n.CurrentHp > 0);
+
+        var bosses = nameIdsByPhase[phase.Key];
+        return phase.StartWhenAllTargetable ? bosses.All(Up) : bosses.Any(Up);
+    }
+
+    /// <summary>Every party member dead (you alone when not in a party).</summary>
+    public static bool PartyWiped()
+    {
+        if (Plugin.PartyList.Length > 0)
+            return Plugin.PartyList.All(m => m.CurrentHP == 0);
+        return Plugin.ObjectTable.LocalPlayer is { } me && (me.IsDead || me.CurrentHp == 0);
+    }
+
+    private void ResetPhase()
+    {
+        phaseStartUtc = null;
+        followed.Clear();
+    }
+}
