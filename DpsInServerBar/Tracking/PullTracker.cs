@@ -167,6 +167,7 @@ public sealed class PullTracker : IDisposable
                                : null,
             BossName = plugin.Boss.Current?.Name ?? string.Empty,
             LastBossCast = plugin.Boss.LastCast,
+            LastBossCastId = plugin.Boss.LastCastId,
             PartyDps = final.PartyDps(config.IncludeLimitBreakInParty),
             Rank = final.YourRank(),
             RdpsRank = you is { HasRdps: true } ? final.YourRank(byRdps: true) : 0,

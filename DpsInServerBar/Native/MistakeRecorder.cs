@@ -107,7 +107,7 @@ public sealed class MistakeRecorder
         if (mistakes.Any(m => m.Player == player && m.Status == status && m.Ability == ability && at - m.AtSeconds < DuplicateSeconds))
             return;
 
-        mistakes.Add(new MechanicMistake(at, player, job, isYou, status, ability, source));
+        mistakes.Add(new MechanicMistake(at, player, job, isYou, status, ability, source, statusId, actionType == 1 ? actionId : 0));
         revision++;
     }
 

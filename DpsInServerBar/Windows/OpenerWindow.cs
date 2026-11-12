@@ -38,7 +38,12 @@ public sealed class OpenerWindow : Window
     public OpenerWindow(Plugin plugin)
         : base(Loc.T("Opener practice###DpsInServerBarOpener"), ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
     {
-        Loc.Changed += () => WindowName = Loc.T("Opener practice###DpsInServerBarOpener");
+        Loc.Changed += () =>
+        {
+            WindowName = Loc.T("Opener practice###DpsInServerBarOpener");
+            actions.Clear(); // names in the new language
+            potions.Clear();
+        };
         this.plugin = plugin;
         Size = new Vector2(760, 300);
         SizeCondition = ImGuiCond.FirstUseEver;
@@ -232,13 +237,13 @@ public sealed class OpenerWindow : Window
         JobInfo.DrawIcon(job, ImGui.GetFrameHeight());
         ImGui.SameLine();
         ImGui.SetNextItemWidth(Theme.Px(240));
-        using (var combo = ImRaii.Combo("##opener", opener.Name))
+        using (var combo = ImRaii.Combo("##opener", Loc.T(opener.Name)))
         {
             if (combo)
             {
                 foreach (var o in openers)
                 {
-                    if (ImGui.Selectable(o.Name, o == opener))
+                    if (ImGui.Selectable(Loc.T(o.Name), o == opener))
                     {
                         config.OpenerSelected[job] = o.Id;
                         config.Save();
@@ -478,7 +483,7 @@ public sealed class OpenerWindow : Window
         foreach (var note in opener.Notes)
         {
             ImGui.Bullet();
-            ImGui.TextColored(Theme.TextMuted, note);
+            ImGui.TextColored(Theme.TextMuted, Loc.T(note));
         }
 
         Theme.Hint(Loc.F("Source: {0}.",opener.Source));
@@ -700,7 +705,7 @@ public sealed class OpenerWindow : Window
             Theme.Hint(Loc.T("Press Start for a countdown, or use the first action to start right away. Big boxes: GCDs, small ones: oGCDs."));
     }
 
-    /// <summary>Icon and name (in the game's language) of a step: its first action, or the tincture.</summary>
+    /// <summary>Icon and name (in the plugin language) of a step: its first action, or the tincture.</summary>
     private (uint Icon, string Name) Info(OpenerStep step)
     {
         if (step.Kind == StepKind.Potion)
@@ -724,8 +729,8 @@ public sealed class OpenerWindow : Window
         if (actions.TryGetValue(id, out var info))
             return info;
 
-        info = Plugin.DataManager.GetExcelSheet<Action>().TryGetRow(id, out var row)
-            ? (row.Icon, row.Name.ExtractText())
+        info = Plugin.DataManager.GetExcelSheet<Action>(Loc.GameLanguage).TryGetRow(id, out var row)
+            ? (row.Icon, Loc.Game(row.Name.ExtractText()))
             : (0u, Loc.F("Action {0}",id));
         actions[id] = info;
         return info;
@@ -743,8 +748,8 @@ public sealed class OpenerWindow : Window
                          .Select(i => i.RowId)
                          .DefaultIfEmpty(0u)
                          .Max();
-        (uint, uint, string) result = best != 0 && Plugin.DataManager.GetExcelSheet<Item>().TryGetRow(best, out var item)
-            ? (best, item.Icon, item.Name.ExtractText())
+        (uint, uint, string) result = best != 0 && Plugin.DataManager.GetExcelSheet<Item>(Loc.GameLanguage).TryGetRow(best, out var item)
+            ? (best, item.Icon, Loc.Game(item.Name.ExtractText()))
             : (0u, 0u, Loc.T("Tincture"));
         potions[stat] = result;
         return result;

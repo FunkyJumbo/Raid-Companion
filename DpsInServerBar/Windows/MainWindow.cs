@@ -831,7 +831,7 @@ public sealed class MainWindow : Window
                      .MaxBy(p => (Progression.Phase(p), p.DurationSeconds)) is { } furthest)
         {
             var number = prog.IndexOf(furthest) + 1;
-            cards.Add(new Card(Loc.T("Furthest mechanic"), furthest.LastBossCast, Theme.Crystal,
+            cards.Add(new Card(Loc.T("Furthest mechanic"), furthest.LastBossCastText, Theme.Crystal,
                                           Loc.F("pull {0}, at {1}",number,NumberFormat.Duration(TimeSpan.FromSeconds(furthest.DurationSeconds)))));
         }
 
@@ -903,7 +903,7 @@ public sealed class MainWindow : Window
             i => Loc.F("Pull {0}  {1} in the instance\n{2:dd/MM HH:mm}  {3}\n",i + 1,NumberFormat.Duration(TimeSpan.FromHours(instanceHours[i])),prog[i].StartUtc.ToLocalTime(),NumberFormat.Duration(TimeSpan.FromSeconds(prog[i].DurationSeconds)))
                  + Progression.Label(prog[i])
                  + (Progression.WipeCause(prog[i]) is { } cause ? Loc.F("\nWiped by {0}",cause) : string.Empty)
-                 + (prog[i].Outcome != PullOutcome.Kill && prog[i].LastBossCast.Length > 0 ? Loc.F("\nLast enemy cast: {0}",prog[i].LastBossCast) : string.Empty)
+                 + (prog[i].Outcome != PullOutcome.Kill && prog[i].LastBossCast.Length > 0 ? Loc.F("\nLast enemy cast: {0}",prog[i].LastBossCastText) : string.Empty)
                  + Loc.T("\nClick to open this pull."));
         if (clicked is { } index)
         {
@@ -1193,10 +1193,14 @@ public sealed class MainWindow : Window
 
     private void DrawHistoryFilter(IReadOnlyList<PullRecord> pulls)
     {
-        // The fights go by their instance (with the fight's name when the instance has two, e.g. a door boss).
+        // The fights go by their instance (with the fight's name when the instance has two, e.g. a door boss); an
+        // ultimate by its own name (its instance has a meaningless name, e.g. "Liminal Space").
         var zoneOf = pulls.Where(p => Progression.Encounter(p).Length > 0)
                           .GroupBy(Progression.Encounter, StringComparer.OrdinalIgnoreCase)
-                          .ToDictionary(g => g.Key, g => g.Select(p => p.Zone).FirstOrDefault(z => z.Length > 0) ?? g.Key,
+                          .ToDictionary(g => g.Key,
+                                        g => Progression.IsUltimate(g.First().TerritoryId)
+                                                 ? g.Key
+                                                 : g.Select(p => p.Zone).FirstOrDefault(z => z.Length > 0) ?? g.Key,
                                         StringComparer.OrdinalIgnoreCase);
         string Label(string title)
         {
@@ -1785,7 +1789,7 @@ public sealed class MainWindow : Window
                 {
                     ImGui.TableNextRow();
                     TimeCell(u.AtSeconds);
-                    IconCell(ActionIcons.OfAction(u.ActionId), u.Action);
+                    IconCell(ActionIcons.OfAction(u.ActionId), GameNames.Action(u.ActionId, u.Action));
                     ImGui.TableNextColumn();
                     ImGui.TextColored(Theme.Bad, u.Rear ? Loc.T("rear") : Loc.T("flank"));
                 }
@@ -1818,7 +1822,7 @@ public sealed class MainWindow : Window
                 {
                     ImGui.TableNextRow();
                     TimeCell(m.AtSeconds);
-                    IconCell(ActionIcons.OfAction(m.ActionId), m.Action);
+                    IconCell(ActionIcons.OfAction(m.ActionId), GameNames.Action(m.ActionId, m.Action));
                     ImGui.TableNextColumn();
                     ImGui.TextColored(Theme.TextMuted, ComboMistakeDetail(m));
                 }
@@ -1847,7 +1851,7 @@ public sealed class MainWindow : Window
         {
             ActionIcons.Draw(dot.Icon, ImGui.GetTextLineHeight());
             ImGui.SameLine(0, Theme.Px(4));
-            ImGui.TextColored(DotColor(dot.Uptime), $"{dot.Name} {dot.Uptime:0.0%}");
+            ImGui.TextColored(DotColor(dot.Uptime), $"{dot.NameText} {dot.Uptime:0.0%}");
             ImGui.SameLine(0, Theme.Px(8));
             ImGui.TextColored(Theme.TextFaint, Loc.F("off the boss {0:0.0}s ",dot.AvailableSeconds - dot.ActiveSeconds)
                                                + Loc.F("of {0}",NumberFormat.Duration(TimeSpan.FromSeconds(dot.AvailableSeconds))));
@@ -1871,7 +1875,7 @@ public sealed class MainWindow : Window
                 {
                     ImGui.TableNextRow();
                     TimeCell(drop.AtSeconds);
-                    IconCell(dot.Icon, dot.Name);
+                    IconCell(dot.Icon, dot.NameText);
                     ImGui.TableNextColumn();
                     ImGui.TextColored(drop.Seconds >= 3 ? Theme.Bad : Theme.Warn, $"{drop.Seconds:0.0}s");
                 }
@@ -1951,7 +1955,7 @@ public sealed class MainWindow : Window
             {
                 if (table)
                 {
-                    foreach (var action in player.GroupBy(u => u.Action).OrderBy(g => g.First().AtSeconds))
+                    foreach (var action in player.GroupBy(u => GameNames.Action(u.ActionId, u.Action)).OrderBy(g => g.First().AtSeconds))
                     {
                         ImGui.TableNextRow();
                         IconCell(ActionIcons.OfAction(action.First().ActionId), action.Key);
@@ -1983,7 +1987,7 @@ public sealed class MainWindow : Window
             using var table = DetailTable("##pmittable", (Loc.T("Action"), -3), (Loc.T("Uses"), 60));
             if (table)
             {
-                foreach (var g in mine.GroupBy(m => m.Action).OrderByDescending(g => g.Count()))
+                foreach (var g in mine.GroupBy(m => GameNames.Action(m.ActionId, m.Action)).OrderByDescending(g => g.Count()))
                 {
                     ImGui.TableNextRow();
                     IconCell(ActionIcons.OfAction(g.First().ActionId), g.Key);
@@ -2022,7 +2026,7 @@ public sealed class MainWindow : Window
             ImGui.SameLine(0, Theme.Px(8));
             ActionIcons.Draw(dot.Icon, ImGui.GetTextLineHeight());
             ImGui.SameLine(0, Theme.Px(4));
-            ImGui.TextColored(dot.Uptime >= 0.95 ? Theme.Good : dot.Uptime >= 0.85 ? Theme.Warn : Theme.Bad, $"{dot.Name} {dot.Uptime:0.0%}");
+            ImGui.TextColored(dot.Uptime >= 0.95 ? Theme.Good : dot.Uptime >= 0.85 ? Theme.Warn : Theme.Bad, $"{dot.NameText} {dot.Uptime:0.0%}");
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip(Loc.F("Off the boss for {0:0.0}s of {1}",dot.AvailableSeconds - dot.ActiveSeconds,NumberFormat.Duration(TimeSpan.FromSeconds(dot.AvailableSeconds))));
         }
@@ -2137,10 +2141,10 @@ public sealed class MainWindow : Window
             ImGui.SameLine(0, Theme.Px(10));
             var hovered = ActionIcons.Draw(ActionIcons.OfAction(action.Key), iconSize);
             ImGui.SameLine(0, Theme.Px(4));
-            ImGui.TextColored(Theme.Bad, names ? Loc.F("{0} {1}/{2} missed",missed[0].Action,missed.Count,action.Count()) : $"{missed.Count}/{action.Count()}");
+            ImGui.TextColored(Theme.Bad, names ? Loc.F("{0} {1}/{2} missed",GameNames.Action(missed[0].ActionId, missed[0].Action),missed.Count,action.Count()) : $"{missed.Count}/{action.Count()}");
             if (hovered || ImGui.IsItemHovered())
             {
-                ImGui.SetTooltip(Loc.F("{0} ({1}): {2} of {3} missed, at ",missed[0].Action,(missed[0].Rear ? Loc.T("rear") : Loc.T("flank")),missed.Count,action.Count())
+                ImGui.SetTooltip(Loc.F("{0} ({1}): {2} of {3} missed, at ",GameNames.Action(missed[0].ActionId, missed[0].Action),(missed[0].Rear ? Loc.T("rear") : Loc.T("flank")),missed.Count,action.Count())
                                  + string.Join(", ", missed.Select(u => NumberFormat.Duration(TimeSpan.FromSeconds(u.AtSeconds)))));
             }
         }
@@ -2171,7 +2175,7 @@ public sealed class MainWindow : Window
                 ImGui.SameLine(0, Theme.Px(10));
                 var hovered = ActionIcons.Draw(ActionIcons.OfAction(group.Key), iconSize);
                 ImGui.SameLine(0, Theme.Px(4));
-                ImGui.TextColored(Theme.Bad, names ? $"{list[0].Action} ×{list.Count}" : $"×{list.Count}");
+                ImGui.TextColored(Theme.Bad, names ? $"{GameNames.Action(list[0].ActionId, list[0].Action)} ×{list.Count}" : $"×{list.Count}");
                 if (hovered || ImGui.IsItemHovered())
                     ImGui.SetTooltip(string.Join("\n", list.Select(ComboMistakeText)));
             }
@@ -2185,9 +2189,9 @@ public sealed class MainWindow : Window
 
     private static string ComboMistakeDetail(ComboMistake m) => m.Kind switch
     {
-        ComboMistakeKind.NoCombo => Loc.F("{0} without its combo (needs {1} before)",m.Action,m.Expected),
-        ComboMistakeKind.TimedOut => Loc.F("combo lost after {0}: its timer ran out before the next step",m.Action),
-        _ => Loc.F("{0} restarted the combo: {1} was waiting for its next step",m.Action,m.Expected),
+        ComboMistakeKind.NoCombo => Loc.F("{0} without its combo (needs {1} before)",GameNames.Action(m.ActionId, m.Action),GameNames.Action(m.ExpectedId, m.Expected)),
+        ComboMistakeKind.TimedOut => Loc.F("combo lost after {0}: its timer ran out before the next step",GameNames.Action(m.ActionId, m.Action)),
+        _ => Loc.F("{0} restarted the combo: {1} was waiting for its next step",GameNames.Action(m.ActionId, m.Action),GameNames.Action(m.ExpectedId, m.Expected)),
     };
 
     /// <summary>A foldable strip of the pull with each clip at its time, shown by the icon of the oGCD that caused it.</summary>
@@ -2353,7 +2357,7 @@ public sealed class MainWindow : Window
             ImGui.SameLine();
             ImGui.TextColored(Theme.TextFaint, d.Job);
             ImGui.TableNextColumn();
-            ImGui.TextColored(Theme.Bad, d.Cause);
+            ImGui.TextColored(Theme.Bad, d.CauseText);
             if (DeathDetails(d) is { Length: > 0 } details)
             {
                 ImGui.SameLine();
@@ -2394,7 +2398,7 @@ public sealed class MainWindow : Window
             ImGui.SameLine();
             ImGui.TextColored(Theme.Bad, h.Damage.ToString("N0", CultureInfo.InvariantCulture));
             ImGui.SameLine();
-            ImGui.TextUnformatted(h.Ability);
+            ImGui.TextUnformatted(h.AbilityText);
             if (h.Source.Length > 0)
             {
                 ImGui.SameLine();
@@ -2423,16 +2427,16 @@ public sealed class MainWindow : Window
         var rows = new List<(double At, bool Cast, string Name, string On, string Job, string From, double? End, double? Length)>();
         if (fightLogCasts)
         {
-            rows.AddRange(pull.BossCasts.Where(c => Match(c.Action, c.Caster))
-                              .Select(c => (c.AtSeconds, true, c.Action, string.Empty, string.Empty, c.Caster,
+            rows.AddRange(pull.BossCasts.Where(c => Match(GameNames.Action(c.ActionId, c.Action), c.Caster))
+                              .Select(c => (c.AtSeconds, true, GameNames.Action(c.ActionId, c.Action), string.Empty, string.Empty, c.Caster,
                                             c.CastSeconds > 0 ? c.AtSeconds + c.CastSeconds : (double?)null,
                                             c.CastSeconds > 0 ? c.CastSeconds : (double?)null)));
         }
 
         if (fightLogDebuffs)
         {
-            rows.AddRange(pull.Debuffs.Where(d => Match(d.Status, d.Player, Names.Show(d.Player), d.Source))
-                              .Select(d => (d.AppliedSeconds, false, d.Status, Names.Show(d.Player), d.Job, d.Source, d.EndSeconds,
+            rows.AddRange(pull.Debuffs.Where(d => Match(GameNames.Status(d.StatusId, d.Status), d.Player, Names.Show(d.Player), d.Source))
+                              .Select(d => (d.AppliedSeconds, false, GameNames.Status(d.StatusId, d.Status), Names.Show(d.Player), d.Job, d.Source, d.EndSeconds,
                                             d.EndSeconds is { } end ? end - d.AppliedSeconds : (double?)null)));
         }
 
@@ -2571,7 +2575,7 @@ public sealed class MainWindow : Window
             {
                 var p = player.First();
                 lanes.Add(new TimelineLane(null, p.Job, iconLane, Theme.Crystal, TimelineMark.Icon,
-                                           player.Select(u => (u.AtSeconds, ActionIcons.OfAction(u.ActionId), $"{Names.Show(u.Player)}: {u.Action}")).ToList()));
+                                           player.Select(u => (u.AtSeconds, ActionIcons.OfAction(u.ActionId), $"{Names.Show(u.Player)}: {GameNames.Action(u.ActionId, u.Action)}")).ToList()));
             }
         }
 
@@ -2707,14 +2711,14 @@ public sealed class MainWindow : Window
 
     // A death in one line: who, of what, and the detail.
     private static string DeathText(PartyDeath d) =>
-        Loc.F("{0} died: {1}",Names.Show(d.Player),d.Cause) + (DeathDetails(d) is { Length: > 0 } details ? $" {details}" : string.Empty);
+        Loc.F("{0} died: {1}",Names.Show(d.Player),d.CauseText) + (DeathDetails(d) is { Length: > 0 } details ? $" {details}" : string.Empty);
 
     /// <summary>
     /// Failed mechanics: per player, the penalty debuffs taken (most first); in the history, every one in time order.
     /// </summary>
     // One failed mechanic: when, the debuff, and the action that put it.
     private static string MistakeText(MechanicMistake m) =>
-        Loc.F("{0}  {1}  from {2}",NumberFormat.Duration(TimeSpan.FromSeconds(m.AtSeconds)),m.Status,m.Ability)
+        Loc.F("{0}  {1}  from {2}",NumberFormat.Duration(TimeSpan.FromSeconds(m.AtSeconds)),m.StatusText,m.AbilityText)
         + (m.Source.Length > 0 ? $" ({m.Source})" : string.Empty);
 
     private static void DrawMistakes(IReadOnlyList<MechanicMistake> mistakes, bool timeline)
@@ -2730,7 +2734,7 @@ public sealed class MainWindow : Window
 
         var players = mistakes.GroupBy(m => m.Player)
                               .Select(g => (Player: g.Key, g.First().Job, g.First().IsYou, Count: g.Count(), List: g.ToList(),
-                                            Debuffs: string.Join(", ", g.GroupBy(m => m.Status)
+                                            Debuffs: string.Join(", ", g.GroupBy(m => m.StatusText)
                                                                         .OrderByDescending(s => s.Count())
                                                                         .Select(s => s.Count() > 1 ? $"{s.Key} ×{s.Count()}" : s.Key))))
                               .OrderByDescending(p => p.Count)
@@ -2782,9 +2786,9 @@ public sealed class MainWindow : Window
             ImGui.SameLine();
             ImGui.TextColored(m.IsYou ? Theme.GoldBright : Theme.Text, Names.Show(m.Player));
             ImGui.SameLine();
-            ImGui.TextColored(Theme.Bad, m.Status);
+            ImGui.TextColored(Theme.Bad, m.StatusText);
             ImGui.SameLine();
-            ImGui.TextColored(Theme.TextMuted, m.Source.Length > 0 ? Loc.F("from {0} ({1})",m.Ability,m.Source) : Loc.F("from {0}",m.Ability));
+            ImGui.TextColored(Theme.TextMuted, m.Source.Length > 0 ? Loc.F("from {0} ({1})",m.AbilityText,m.Source) : Loc.F("from {0}",m.AbilityText));
         }
     }
 

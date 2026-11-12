@@ -170,7 +170,7 @@ public sealed class DpsGraph
         var mouse = ImPlot.GetPlotMousePos();
         var near = deaths.Where(d => Math.Abs(d.AtSeconds - mouse.X) <= 1.5).ToList();
         if (near.Count > 0)
-            ImGui.SetTooltip(string.Join("\n", near.Select(d => Loc.F("{0}  {1} died: {2}",NumberFormat.Duration(TimeSpan.FromSeconds(d.AtSeconds)),Names.Show(d.Player),d.Cause))));
+            ImGui.SetTooltip(string.Join("\n", near.Select(d => Loc.F("{0}  {1} died: {2}",NumberFormat.Duration(TimeSpan.FromSeconds(d.AtSeconds)),Names.Show(d.Player),d.CauseText))));
     }
 
     /// <summary>
@@ -234,9 +234,16 @@ public sealed class DpsGraph
         var (tickValues, tickLabels) = xLabel == Loc.T("Pull") ? PullTicks(xMax) : HourTicks(xMax);
         ImPlot.SetupAxisTicks(ImAxis.X1, ref tickValues[0], tickValues.Length, tickLabels);
 
-        // Ultimate: a line between phases, each phase named in its band.
+        // Ultimate: phases in alternating bands, a line between them, each phase named in its band.
         if (ultimate)
         {
+            for (var i = 0; i < phases!.Count; i++)
+            {
+                var top = new[] { i + 1f, i + 1f };
+                ImPlot.SetNextFillStyle(Theme.Alpha(Theme.TextFaint, i % 2 == 0 ? 0.12f : 0.04f));
+                ImPlot.PlotShaded($"##band{i}", ref top[0], 2, i, xMax + margin - xMin, xMin, ImPlotShadedFlags.None, 0, sizeof(float));
+            }
+
             var bounds = Enumerable.Range(1, phases!.Count - 1).Select(i => (float)i).ToArray();
             if (bounds.Length > 0)
             {

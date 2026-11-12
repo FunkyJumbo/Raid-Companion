@@ -16,8 +16,12 @@ public sealed record DotDrop(double AtSeconds, double Seconds);
 /// <param name="ActiveSeconds">Time the DoT was on the boss while it could be attacked.</param>
 /// <param name="AvailableSeconds">Time the boss could be attacked.</param>
 /// <param name="Drops">Times the DoT was off the boss for a second or more (the start of the pull included).</param>
-public sealed record DotUptime(string Name, uint Icon, double ActiveSeconds, double AvailableSeconds, DotDrop[]? Drops = null)
+public sealed record DotUptime(
+    string Name, uint Icon, double ActiveSeconds, double AvailableSeconds, DotDrop[]? Drops = null, uint StatusId = 0)
 {
+    /// <summary><see cref="Name"/> in the plugin language (as saved for older pulls).</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public string NameText => UI.GameNames.Status(StatusId, Name);
+
     public double Uptime => AvailableSeconds > 0 ? Math.Min(1, ActiveSeconds / AvailableSeconds) : 0;
 }
 
@@ -162,6 +166,6 @@ public sealed class DotTracker
         var (name, icon) = dataManager.GetExcelSheet<Lumina.Excel.Sheets.Status>().TryGetRow(statusId, out var row)
             ? (row.Name.ExtractText(), row.Icon)
             : ($"#{statusId}", 0u);
-        return new DotUptime(name, icon, activeSeconds, available, dotDrops);
+        return new DotUptime(name, icon, activeSeconds, available, dotDrops, statusId);
     }
 }

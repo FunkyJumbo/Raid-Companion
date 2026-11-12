@@ -107,6 +107,12 @@ public sealed class PullRecord
     /// <summary>The last cast an enemy started before the pull ended: how far into the fight it went.</summary>
     public string LastBossCast { get; set; } = string.Empty;
 
+    /// <summary>Action id of <see cref="LastBossCast"/>, 0 for older pulls.</summary>
+    public uint LastBossCastId { get; set; }
+
+    /// <summary><see cref="LastBossCast"/> in the plugin language (as saved for older pulls).</summary>
+    [JsonIgnore] public string LastBossCastText => UI.GameNames.Action(LastBossCastId, LastBossCast);
+
     public double PartyDps { get; set; }
     public int Rank { get; set; }
 

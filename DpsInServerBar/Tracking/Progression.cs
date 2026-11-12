@@ -100,9 +100,9 @@ public static class Progression
         var end = Math.Max(pull.DurationSeconds, pull.PartyDeaths.Max(d => d.AtSeconds));
         var final = pull.PartyDeaths.Where(d => d.AtSeconds >= end - WipeWindowSeconds).ToList();
         if (final.Count == 0)
-            return pull.PartyDeaths[0].Cause;
+            return pull.PartyDeaths[0].CauseText;
 
-        return final.GroupBy(d => d.Cause)
+        return final.GroupBy(d => d.CauseText)
                     .OrderByDescending(g => g.Count())
                     .ThenBy(g => g.Min(d => d.AtSeconds))
                     .First().Key;

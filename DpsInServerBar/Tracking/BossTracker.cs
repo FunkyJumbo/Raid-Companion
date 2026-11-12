@@ -43,6 +43,9 @@ public sealed class BossTracker
     /// <summary>Name of the last cast an enemy started in the fight in progress (kept after it ends), empty if none.</summary>
     public string LastCast { get; private set; } = string.Empty;
 
+    /// <summary>Action id of <see cref="LastCast"/>, 0 when none.</summary>
+    public uint LastCastId { get; private set; }
+
     public void Update()
     {
         var inCombat = condition[ConditionFlag.InCombat];
@@ -50,6 +53,7 @@ public sealed class BossTracker
         {
             Current = null;
             LastCast = string.Empty;
+            LastCastId = 0;
             casting.Clear();
             engaged.Clear();
         }
@@ -102,7 +106,10 @@ public sealed class BossTracker
 
         casting[npc.GameObjectId] = action;
         if (ActionName(action) is { Length: > 0 } name)
+        {
             LastCast = name;
+            LastCastId = action;
+        }
     }
 
     private string ActionName(uint action)

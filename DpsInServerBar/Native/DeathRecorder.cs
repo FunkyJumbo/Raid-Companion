@@ -19,6 +19,9 @@ public sealed record DeathInfo(DateTime TimeUtc, string Ability, string Source, 
 
     /// <summary>The last hits taken before the death, oldest first.</summary>
     public IReadOnlyList<DeathHit> Recap { get; init; } = [];
+
+    /// <summary>Key of <see cref="DeathInfo.Ability"/>, to show it in the plugin language (see <see cref="UI.GameNames.Resolve"/>).</summary>
+    public string AbilityKey { get; init; } = string.Empty;
 }
 
 /// <summary>
@@ -88,10 +91,10 @@ public sealed class DeathRecorder
 
     /// <param name="actionType">1 = action (abilities of players and enemies alike).</param>
     public void OnHitTaken(uint actionType, uint actionId, string source, long damage) =>
-        AddHit(new Hit(DateTime.UtcNow, ActionName(actionType, actionId), source, damage));
+        AddHit(new Hit(DateTime.UtcNow, ActionName(actionType, actionId), source, damage, ActionKey(actionType, actionId)));
 
     public void OnDotTaken(uint statusId, string source, long damage) =>
-        AddHit(new Hit(DateTime.UtcNow, Loc.F("{0} (DoT)",StatusName(statusId)), source, damage));
+        AddHit(new Hit(DateTime.UtcNow, Loc.F("{0} (DoT)",StatusName(statusId)), source, damage, $"dot:{statusId}"));
 
     /// <summary>
     /// Called every frame: records your HP, height and debuffs while alive, catches a death whose packet was missed and
@@ -124,7 +127,7 @@ public sealed class DeathRecorder
         else if (now < fallCheckUntilUtc && deathHeight - player.Position.Y >= FallHeight
                  && LastDeath is { Ability: Instant } death)
         {
-            LastDeath = death with { Ability = Fall };
+            LastDeath = death with { Ability = Fall, AbilityKey = "fall" };
             fallCheckUntilUtc = DateTime.MinValue;
             if (logDetails)
                 log.Information($"[DeathRecorder] body fell from {deathHeight:0.0} to {player.Position.Y:0.0} after death: {Fall}");
@@ -157,11 +160,11 @@ public sealed class DeathRecorder
         else if (delayed is not null)
             LastDeath = delayed.ToDeath(now);
         else if (ExpiringDebuff() is { } debuff)
-            LastDeath = new DeathInfo(now, Loc.F("{0} (debuff)",StatusName(debuff.StatusId)), nameOf(debuff.SourceId), 0);
+            LastDeath = new DeathInfo(now, Loc.F("{0} (debuff)",StatusName(debuff.StatusId)), nameOf(debuff.SourceId), 0) { AbilityKey = $"debuff:{debuff.StatusId}" };
         else if (FellBeforeDeath())
-            LastDeath = new DeathInfo(now, Fall, string.Empty, 0);
+            LastDeath = new DeathInfo(now, Fall, string.Empty, 0) { AbilityKey = "fall" };
         else
-            LastDeath = new DeathInfo(now, Instant, string.Empty, 0);
+            LastDeath = new DeathInfo(now, Instant, string.Empty, 0) { AbilityKey = "instant" };
 
         // Overkill: the hits landed since the HP was last seen (the named hit when the HP showed none of them), minus that HP.
         long overkill = 0;
@@ -176,7 +179,7 @@ public sealed class DeathRecorder
             HpBefore = lastAliveHp,
             Overkill = overkill,
             Recap = hits.TakeLast(RecapHits)
-                        .Select(h => new DeathHit(Math.Round((now - h.TimeUtc).TotalSeconds, 1), h.Ability, h.Source, h.Damage))
+                        .Select(h => new DeathHit(Math.Round((now - h.TimeUtc).TotalSeconds, 1), h.Ability, h.Source, h.Damage, h.Key))
                         .ToList(),
         };
 
@@ -231,13 +234,21 @@ public sealed class DeathRecorder
         return row.Name.ExtractText() is { Length: > 0 } name ? name : $"#{actionId}";
     }
 
+    // The key of ActionName, to show the name again in the plugin language.
+    private string ActionKey(uint actionType, uint actionId)
+    {
+        if (actionType != 1 || !dataManager.GetExcelSheet<Lumina.Excel.Sheets.Action>().TryGetRow(actionId, out var row))
+            return string.Empty;
+        return row.ActionCategory.RowId == AutoAttackCategory ? "auto" : UI.GameNames.ActionKey(actionId);
+    }
+
     private string StatusName(uint statusId) =>
         dataManager.GetExcelSheet<Status>().TryGetRow(statusId, out var row) && row.Name.ExtractText() is { Length: > 0 } name
             ? name
             : Loc.T("damage over time");
 
-    private sealed record Hit(DateTime TimeUtc, string Ability, string Source, long Damage)
+    private sealed record Hit(DateTime TimeUtc, string Ability, string Source, long Damage, string Key)
     {
-        public DeathInfo ToDeath(DateTime now) => new(now, Ability, Source, Damage);
+        public DeathInfo ToDeath(DateTime now) => new(now, Ability, Source, Damage) { AbilityKey = Key };
     }
 }

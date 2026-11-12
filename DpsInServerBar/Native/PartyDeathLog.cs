@@ -50,7 +50,7 @@ public sealed class PartyDeathLog
             publishedKey = (revision, startUtc);
             published = deaths.Where(e => e.Info.TimeUtc >= startUtc.AddSeconds(-2))
                               .Select(e => new PartyDeath(Math.Max(0, (e.Info.TimeUtc - startUtc).TotalSeconds), e.Player, e.Job, e.IsYou,
-                                                          e.Info.Ability, e.Info.Source, e.Info.Damage, e.Info.HpBefore, e.Info.Recap.ToList()))
+                                                          e.Info.Ability, e.Info.Source, e.Info.Damage, e.Info.HpBefore, e.Info.Recap.ToList(), e.Info.AbilityKey))
                               .ToList();
         }
 

@@ -52,7 +52,7 @@ opening a window. An [**opener practice**](#opener-practice) is included too.
    ```
 3. Save, then install **Raid Companion** from `/xlplugins`.
 
-**Languages:** English, French and German (Settings > Display > Language; *Auto* follows Dalamud's language).
+**Languages:** English, French and German (Settings > Display > Language; *Auto* follows Dalamud's language). And Al Bhed, for the brave.
 Game data (actions, bosses, debuffs) stays in your game client's language.
 
 **Commands:** `/raidcompanion` (or `/rcomp`) opens the main window; see [Commands](#commands) for the full list.
@@ -353,7 +353,7 @@ macros keep working.
 |---|---|
 | **DPS in server bar** | Presets (renamable, switchable with `/raidcompanion preset N`), metric, number format (`12345` / `12,345` / `12.3k`), bar elements and their order, separator, **bar preview** (placeholder values for 10 s), auto-hide, colors |
 | **Chat summary** | Pull summary on/off, in dungeons, at the end of each ultimate phase, each party death as it happens (optionally with the overkill), values shown, comparison with your best kill, **preview in chat** |
-| **Display** | **Language** (English, French or German; Auto follows Dalamud's language), compact meter (columns, header, background opacity), DPS graphs in the main window, Limit Break in party DPS, **hide player names** (made-up names in every window, for screenshots) |
+| **Display** | **Language** (English, French, German or Al Bhed; Auto follows Dalamud's language), compact meter (columns, header, background opacity), DPS graphs in the main window, Limit Break in party DPS, **hide player names** (made-up names in every window, for screenshots) |
 | **Pulls history** | Record only in duties, **kinds of content recorded** (dungeons, trials, extremes, raids, savage, criterion, ultimates, other), minimum pull length, history size, graph window, tankbuster vulnerabilities ignored |
 | **Appearance** | Theme presets, saved custom themes (renamable), background opacity, custom colors, preview |
 | **DPS check** (WIP) | Boss HP, enrage time and minimum party DPS per fight; ultimate phases with each phase's HP, enrage and required DPS; other zones / encounters |
