@@ -58,10 +58,11 @@ Game data (actions, bosses, debuffs) stays in your game client's language.
 
 ## About
 
-Raid Companion was first developed in another repository, under the name *DPS In Server Bar*. The project has since
-grown well beyond the server bar and taken a new direction, so for a clean naming and a fresh start it moved to this
-brand new repository. The full development history is still available in the original one:
-[FunkyJumbo/DPS-In-Server-Bar](https://github.com/FunkyJumbo/DPS-In-Server-Bar).
+> [!IMPORTANT]
+> Raid Companion was first developed in another repository, under the name *DPS In Server Bar*. The project has since
+> grown well beyond the server bar and taken a new direction, so for a clean naming and a fresh start it moved to this
+> brand new repository. The full development history is still available in the original one:
+> [FunkyJumbo/DPS-In-Server-Bar](https://github.com/FunkyJumbo/DPS-In-Server-Bar).
 
 <p align="center">
   <i>Raid Companion is still new and will keep growing, one update at a time. We hope you find it useful, and good luck
