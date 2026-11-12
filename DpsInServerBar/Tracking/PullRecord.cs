@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json.Serialization;
 using DpsInServerBar.Combat;
 using DpsInServerBar.Native;
@@ -76,6 +77,13 @@ public sealed class PullRecord
 
     /// <summary>Uptime of each ultimate phase reached in this pull.</summary>
     public List<PhaseUptime> PhaseUptimes { get; set; } = [];
+
+    /// <summary>
+    /// <see cref="PhaseUptimes"/> without the bogus entries of older versions: for a fraction of a second after the pull
+    /// started, the phase reached in the previous pull was still counted.
+    /// </summary>
+    [JsonIgnore]
+    public IEnumerable<PhaseUptime> ReachedPhases => PhaseUptimes.Where(p => p.Number == 1 || p.AvailableSeconds >= 0.3);
 
     /// <summary>Seconds (0-1) an enemy was targetable, then seconds your GCD was rolling, for each second of the pull.</summary>
     public float[] UptimeAvailableBySecond { get; set; } = [];

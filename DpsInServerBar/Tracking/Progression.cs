@@ -59,7 +59,7 @@ public static class Progression
     public static double Max(uint territory) => UltimateTracker.FightFor(territory)?.Phases.Count ?? 100;
 
     /// <summary>Phase reached (1-based) in an ultimate, from the phases the pull has uptime for.</summary>
-    public static int Phase(PullRecord pull) => pull.PhaseUptimes.Count > 0 ? pull.PhaseUptimes.Max(p => p.Number) : 1;
+    public static int Phase(PullRecord pull) => pull.ReachedPhases.Select(p => p.Number).DefaultIfEmpty(1).Max();
 
     /// <summary>The pull's progress, null when unknown (pulls recorded before the boss HP was saved).</summary>
     public static double? Score(PullRecord pull)

@@ -1689,7 +1689,7 @@ public sealed class MainWindow : Window
 
         if (pull.PhaseUptimes.Count > 0)
         {
-            Theme.Hint(Loc.T("Per phase: ") + string.Join("   ", pull.PhaseUptimes.Select(
+            Theme.Hint(Loc.T("Per phase: ") + string.Join("   ", pull.ReachedPhases.Select(
                                          p => $"{UltimateDefinitions.Label(pull.TerritoryId, p.Number)} {p.Uptime:0.0%}")));
         }
 

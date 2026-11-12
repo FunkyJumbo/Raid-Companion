@@ -74,7 +74,7 @@ public sealed class Plugin : IDalamudPlugin
         Ultimates.PhaseEnded += OnPhaseEnded;
         ContentCategories = new ContentCategories(DataManager);
         Fights = new FightCatalog(DataManager);
-        Uptime = new UptimeTracker(ObjectTable, Condition, () => Ultimates.Current is { Started: true } p ? p.Number : null);
+        Uptime = new UptimeTracker(ObjectTable, Condition, () => Ultimates.Current is { Started: true, InCombat: true } p ? p.Number : null);
         Gauges = new GaugeTracker(JobGauges, ObjectTable, Condition, DataManager);
         native.LocalActionUsed += Gauges.OnActionUsed;
         native.LocalActionUsed += Uptime.OnActionUsed;
