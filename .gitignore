@@ -2,3 +2,5 @@
 obj/
 bin/
 *.user
+PROJECT_OVERVIEW.md
+handoff/

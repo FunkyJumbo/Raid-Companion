@@ -19,10 +19,10 @@ namespace DpsInServerBar.Native;
 
 /// <summary>
 /// Built-in damage meter: hooks the game's action effect and DoT tick handlers and accumulates
-/// damage dealt by party members (pets folded into their owner). Less exhaustive than ACT, but needs nothing else.
+/// damage dealt by party members (pets folded into their owner).
 /// All hooks fire on the game thread, as does <see cref="Tick"/>, so no locking is needed.
 /// </summary>
-public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
+public sealed unsafe class NativeCombatTracker : IDisposable
 {
     private const uint InvalidId = 0xE0000000;
     private const uint LimitBreakId = 0xFFFFFFFE;
@@ -30,6 +30,18 @@ public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
     private const uint ActorControlDotHot = 23;
     private const uint DotHotTypeDamage = 3;
     private const uint DotHotTypeHeal = 4;
+
+    // Kinds of action effect.
+    private const byte EffectDamage = 3;
+    private const byte EffectHeal = 4;
+    private const byte EffectBlockedDamage = 5;
+    private const byte EffectParriedDamage = 6;
+    private const byte EffectStatusApplied = 14;
+
+    // The party changes rarely: read a few times per second rather than every frame.
+    private static readonly TimeSpan PartyRefreshInterval = TimeSpan.FromMilliseconds(250);
+    private readonly Dictionary<uint, string> jobAbbreviations = new();
+    private DateTime nextPartyRefreshUtc;
 
     private readonly IObjectTable objectTable;
     private readonly IPartyList partyList;
@@ -96,6 +108,7 @@ public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
 
     public string Name => "Built-in";
     public bool IsEnabled => effectHook?.IsEnabled == true;
+    /// <summary>The hooks are in place: fights are being recorded.</summary>
     public bool IsReady => IsEnabled;
     public string? HookError { get; }
     public CombatSnapshot? Latest => latest;
@@ -117,6 +130,9 @@ public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
     /// <summary>Tank swaps on the boss in the current or last fight.</summary>
     public TankSwapLog TankSwaps => tankSwaps;
 
+    /// <summary>Anything you used landed (action type: 1 = action, 2 = item; its id), raised from the game thread.</summary>
+    public event Action<byte, uint>? LocalEffect;
+
     /// <summary>One of your own actions landed (action id), raised from the game thread.</summary>
     public event Action<uint>? LocalActionUsed;
 
@@ -127,20 +143,10 @@ public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
         ? Loc.F("unavailable ({0})", HookError)
         : IsEnabled ? Loc.T("listening") : Loc.T("disabled");
 
-    public void SetEnabled(bool enabled)
+    public void Start()
     {
-        if (enabled)
-        {
-            effectHook?.Enable();
-            actorControlHook?.Enable();
-        }
-        else
-        {
-            effectHook?.Disable();
-            actorControlHook?.Disable();
-            latest = null;
-            active = false;
-        }
+        effectHook?.Enable();
+        actorControlHook?.Enable();
     }
 
     public void Dispose()
@@ -155,19 +161,23 @@ public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
         if (!IsEnabled)
             return;
 
-        RefreshParty();
-        partyDeaths.Tick(party.Select(p => (p.Key, p.Value.Name, p.Value.Job.ToUpperInvariant(), p.Value.IsLocalPlayer)),
-                         condition[ConditionFlag.InCombat], NameOf);
-        mistakes.Tick(condition[ConditionFlag.InCombat]);
-        heals.Tick(condition[ConditionFlag.InCombat]);
-        mitigations.Tick(condition[ConditionFlag.InCombat]);
-        tankSwaps.Tick(party.Select(p => (p.Key, p.Value.Name, p.Value.Job)), condition[ConditionFlag.InCombat]);
+        var now = DateTime.UtcNow;
+        var inCombat = condition[ConditionFlag.InCombat];
+        if (now >= nextPartyRefreshUtc)
+        {
+            nextPartyRefreshUtc = now + PartyRefreshInterval;
+            RefreshParty();
+        }
+
+        partyDeaths.Tick(party.Select(p => (p.Key, p.Value.Name, p.Value.Job, p.Value.IsLocalPlayer)), inCombat, NameOf);
+        mistakes.Tick(inCombat);
+        heals.Tick(inCombat);
+        mitigations.Tick(inCombat);
+        tankSwaps.Tick(party.Select(p => (p.Key, p.Value.Name, p.Value.Job)), inCombat);
 
         if (!active)
             return;
 
-        var now = DateTime.UtcNow;
-        var inCombat = condition[ConditionFlag.InCombat];
         if (!inCombat && (now - lastHitUtc).TotalSeconds > 1.5)
         {
             active = false;
@@ -198,7 +208,10 @@ public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
                 tankSwaps.OnAction(casterEntityId, header->ActionId);
                 mitigations.OnAction(caster.Name, caster.Job, caster.IsLocalPlayer, header->ActionId);
             }
-            if (header->ActionType == 1 && casterEntityId == (objectTable.LocalPlayer?.EntityId ?? 0))
+            var isLocal = casterEntityId != 0 && casterEntityId == objectTable.LocalPlayer?.EntityId;
+            if (isLocal)
+                LocalEffect?.Invoke((byte)header->ActionType, header->ActionId);
+            if (header->ActionType == 1 && isLocal)
             {
                 LocalActionUsed?.Invoke(header->ActionId);
                 RaiseLocalDamage(header, effects, targetEntityIds);
@@ -208,7 +221,7 @@ public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
             if (owner == 0)
                 return;
 
-            // ActionType 1 = regular action; LB damage is reported separately, like ACT does.
+            // ActionType 1 = regular action; LB damage is reported separately.
             if (header->ActionType == 1 && limitBreakActions.Contains(header->ActionId))
                 owner = LimitBreakId;
 
@@ -220,21 +233,17 @@ public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
 
                 foreach (ref readonly var effect in effects[t].Effects)
                 {
-                    // 14 = status applied to the target: remember the buffs a DoT snapshots.
-                    if (effect.Type == 14 && owner != LimitBreakId && party.TryGetValue(owner, out var applier))
+                    // A status applied to the target: remember the buffs a DoT snapshots.
+                    if (effect.Type == EffectStatusApplied && owner != LimitBreakId && party.TryGetValue(owner, out var applier))
                     {
                         rdps.OnDotApplied(owner, applier.Job, targetId, effect.Value);
                         continue;
                     }
 
-                    // 3 = damage, 5 = blocked damage, 6 = parried damage
-                    if (effect.Type is not (3 or 5 or 6))
+                    if (!IsDamage(effect.Type))
                         continue;
 
-                    long amount = effect.Value;
-                    if ((effect.Param4 & 0x40) != 0)
-                        amount += (long)effect.Param3 << 16;
-
+                    var amount = Amount(effect);
                     var crit = (effect.Param0 & 0x20) != 0;
                     var directHit = (effect.Param0 & 0x40) != 0;
                     AddDamage(owner, targetId, amount, crit, directHit, header->ActionId, dotStatusId: null);
@@ -289,7 +298,7 @@ public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
 
         foreach (ref readonly var effect in effects[0].Effects)
         {
-            if (effect.Type is 3 or 5 or 6)
+            if (IsDamage(effect.Type))
             {
                 LocalDamage(header->ActionId, effect.Param2, targetEntityIds[0].ObjectId);
                 return;
@@ -312,10 +321,10 @@ public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
 
             foreach (ref readonly var effect in effects[t].Effects)
             {
-                // 14 = status applied to the target; its id is the value.
-                if (effect.Type == 14 && mistakes.IsPenalty(effect.Value))
+                // A status applied to the target; its id is the value.
+                if (effect.Type == EffectStatusApplied && mistakes.IsPenalty(effect.Value))
                 {
-                    mistakes.OnPenalty(member.Name, member.Job.ToUpperInvariant(), member.IsLocalPlayer, effect.Value,
+                    mistakes.OnPenalty(member.Name, member.Job, member.IsLocalPlayer, effect.Value,
                                        header->ActionType, header->ActionId, NameOf(casterEntityId), header->NumTargets);
                 }
             }
@@ -332,12 +341,8 @@ public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
             long amount = 0;
             foreach (ref readonly var effect in effects[t].Effects)
             {
-                // 4 = heal
-                if (effect.Type != 4)
-                    continue;
-                amount += effect.Value;
-                if ((effect.Param4 & 0x40) != 0)
-                    amount += (long)effect.Param3 << 16;
+                if (effect.Type == EffectHeal)
+                    amount += Amount(effect);
             }
 
             if (amount > 0)
@@ -367,11 +372,8 @@ public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
             long amount = 0;
             foreach (ref readonly var effect in effects[t].Effects)
             {
-                if (effect.Type is not (3 or 5 or 6))
-                    continue;
-                amount += effect.Value;
-                if ((effect.Param4 & 0x40) != 0)
-                    amount += (long)effect.Param3 << 16;
+                if (IsDamage(effect.Type))
+                    amount += Amount(effect);
             }
 
             if (amount > 0)
@@ -389,6 +391,12 @@ public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
         else if (category == ActorControlDotHot && arg2 == DotHotTypeDamage && arg3 > 0)
             recorder.OnDotTaken(arg1, arg4 is 0 or InvalidId ? string.Empty : NameOf(arg4), arg3);
     }
+
+    private static bool IsDamage(byte effectType) => effectType is EffectDamage or EffectBlockedDamage or EffectParriedDamage;
+
+    /// <summary>Amount of a damage or heal effect: 16 bits, plus 8 more in Param3 for the big numbers.</summary>
+    private static long Amount(in ActionEffectHandler.Effect effect) =>
+        (effect.Param4 & 0x40) != 0 ? effect.Value + ((long)effect.Param3 << 16) : effect.Value;
 
     private string NameOf(uint entityId) => objectTable.SearchByEntityId(entityId)?.Name.TextValue ?? string.Empty;
 
@@ -511,10 +519,9 @@ public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
         var combatants = actors.Values
             .Select(a => new CombatantInfo(
                 Name: a.Name,
-                Job: a.Job.ToUpperInvariant(),
+                Job: a.Job,
                 EncDps: a.Damage / seconds,
                 RDps: a.Id == LimitBreakId ? a.Damage / seconds : (a.Damage + rdps.NetGain(a.Id)) / seconds,
-                EncHps: 0,
                 Damage: a.Damage,
                 DamagePercent: totalDamage > 0 ? a.Damage * 100 / totalDamage : 0,
                 CritPercent: Percent(a.Crits, a.Hits),
@@ -525,7 +532,7 @@ public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
                 RdpsBreakdown: a.Id == LimitBreakId ? null : rdps.Detail(a.Id, seconds)))
             .ToList();
 
-        // Like ACT, name the encounter after the enemy that took the most damage.
+        // Name the encounter after the enemy that took the most damage.
         var title = targets.Values.OrderByDescending(t => t.Damage).FirstOrDefault()?.Name ?? string.Empty;
         var zone = dataManager.GetExcelSheet<TerritoryType>().TryGetRow(clientState.TerritoryType, out var row)
             ? row.PlaceName.Value.Name.ExtractText()
@@ -535,11 +542,18 @@ public sealed unsafe class NativeCombatTracker : ICombatSource, IDisposable
         return new CombatSnapshot(encounter, combatants, isActive, DateTime.UtcNow) { StartUtc = firstHitUtc };
     }
 
-    /// <summary>English abbreviation ("DRK"), matching what ACT sends, whatever the client language.</summary>
-    private string JobAbbreviation(uint classJobId) =>
-        dataManager.GetExcelSheet<ClassJob>(ClientLanguage.English).TryGetRow(classJobId, out var job)
-            ? job.Abbreviation.ExtractText()
-            : string.Empty;
+    /// <summary>English abbreviation ("DRK"), whatever the client language.</summary>
+    private string JobAbbreviation(uint classJobId)
+    {
+        if (jobAbbreviations.TryGetValue(classJobId, out var known))
+            return known;
+
+        var abbreviation = dataManager.GetExcelSheet<ClassJob>(ClientLanguage.English).TryGetRow(classJobId, out var job)
+                               ? job.Abbreviation.ExtractText()
+                               : string.Empty;
+        jobAbbreviations[classJobId] = abbreviation;
+        return abbreviation;
+    }
 
     private static double Percent(int part, int total) => total > 0 ? part * 100.0 / total : 0;
 

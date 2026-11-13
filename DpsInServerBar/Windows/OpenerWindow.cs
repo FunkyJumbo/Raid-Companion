@@ -49,7 +49,11 @@ public sealed class OpenerWindow : Window
         SizeCondition = ImGuiCond.FirstUseEver;
         AllowBackgroundBlur = false;
         plugin.OpenerTracker.ActionUsed += OnActionUsed;
+        shot = new WindowShot(this);
+        TitleBarButtons.Add(shot.TitleBarButton(() => Loc.T("Opener practice")));
     }
+
+    private readonly WindowShot shot;
 
     /// <summary>Height the content took on the last frame: the window fits it, only its width can be changed.</summary>
     private float contentHeight = 300;
@@ -96,6 +100,7 @@ public sealed class OpenerWindow : Window
         }
 
         lastMaxWidth = maxWidth;
+        shot.PreDraw();
     }
 
     public override void PostDraw()
@@ -108,6 +113,7 @@ public sealed class OpenerWindow : Window
 
     public override void Draw()
     {
+        shot.Step();
         DrawContent();
         windowWidth = ImGui.GetWindowWidth();
         contentHeight = ImGui.GetCursorPosY() - ImGui.GetStyle().ItemSpacing.Y + ImGui.GetStyle().WindowPadding.Y;
@@ -121,7 +127,7 @@ public sealed class OpenerWindow : Window
     {
         var config = plugin.Configuration;
         job = CurrentJob();
-        openers = OpenerDefinitions.ForJob(job).ToList();
+        openers = CustomOpeners.ForJob(config, job);
         if (!plugin.OpenerTracker.Available)
         {
             Theme.Hint(Loc.T("Unavailable: the game hook could not be created (see /xllog)."));
@@ -133,6 +139,8 @@ public sealed class OpenerWindow : Window
             run = null;
             Theme.Hint(Loc.F("No opener for {0} yet. Available: ",(job.Length > 0 ? job : Loc.T("this job")))
                        + string.Join(", ", OpenerDefinitions.All.Select(o => o.Job).Distinct()) + ".");
+            if (Theme.GhostButton(Loc.T("Make one in the opener editor")))
+                plugin.OpenOpenerEditor(job);
             return null;
         }
 
@@ -338,6 +346,10 @@ public sealed class OpenerWindow : Window
 
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(opener.Source);
+
+        ImGui.SameLine();
+        if (Theme.IconButton("openereditor", FontAwesomeIcon.PencilAlt, Loc.T("Opener editor: make your own openers, change a copy of this one, share them with a code")))
+            plugin.OpenOpenerEditor(job, opener.Id);
 
         ImGui.SameLine();
         var gameCountdown = UseGameCountdown(config);

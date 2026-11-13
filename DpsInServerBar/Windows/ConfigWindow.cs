@@ -34,7 +34,11 @@ public sealed class ConfigWindow : Window
         AllowBackgroundBlur = false;
         Size = new Vector2(860, 600);
         SizeCondition = ImGuiCond.FirstUseEver;
+        shot = new WindowShot(this);
+        TitleBarButtons.Add(shot.TitleBarButton(() => $"{Loc.T("Settings")} {Sections[selectedSection].Label}", () => fitHeight));
     }
+
+    private readonly WindowShot shot;
 
     /// <param name="Wip">Still being worked on: marked in the menu, with a warning on the page.</param>
     private sealed record Section(FontAwesomeIcon Icon, string Label, string Description, System.Action Draw, bool Wip = false);
@@ -90,6 +94,7 @@ public sealed class ConfigWindow : Window
         // No taller than the page: no empty space at the bottom.
         var maxHeight = fitHeight is { } fit ? Math.Max(420, fit / ImGuiHelpers.GlobalScale) : float.MaxValue;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(680, 420), MaximumSize = new Vector2(float.MaxValue, maxHeight) };
+        shot.PreDraw();
     }
 
     public override void PostDraw()
@@ -100,6 +105,7 @@ public sealed class ConfigWindow : Window
 
     public override void Draw()
     {
+        shot.Step();
         var sidebarWidth = Theme.Px(170);
         windowSize = ImGui.GetWindowSize();
         var contentTop = ImGui.GetCursorPosY();
@@ -262,6 +268,11 @@ public sealed class ConfigWindow : Window
             changed = true;
         }
         Help(Loc.T("Auto follows the language chosen in Dalamud's settings. Game data (actions, bosses, debuffs) stays in the game client's language."));
+        if (c.Language == "al")
+        {
+            changed |= Checkbox(Loc.T("Send my chat messages in Al Bhed"), c.AlBhedSendChat, v => c.AlBhedSendChat = v);
+            Help(Loc.T("What you type in chat (current channel, /p, /s, /tell...) is sent in Al Bhed: the other players read it ciphered. Other commands, <t>-style placeholders, item links and auto-translate phrases are left as they are. Off: your messages only show in Al Bhed in your own chat window."));
+        }
 
         Theme.SectionHeader(Loc.T("Compact meter"));
         Theme.Hint(Loc.T("The small pop-up meter (/raidcompanion compact): player and DPS / rDPS, then the columns ticked here."));
@@ -1146,7 +1157,7 @@ public sealed class ConfigWindow : Window
 
         var territory = plugin.CurrentTerritory;
         var zoneName = ZoneName(territory);
-        var encounter = plugin.Sources.Latest?.Encounter.Title ?? string.Empty;
+        var encounter = plugin.Tracker.Latest?.Encounter.Title ?? string.Empty;
 
         using (ImRaii.Disabled(territory == 0))
         {
@@ -1442,7 +1453,7 @@ public sealed class ConfigWindow : Window
 
         Theme.SectionHeader(Loc.T("Preview"));
         if (Theme.PrimaryButton(Loc.T("Preview the chat summary")))
-            plugin.Pulls.PrintPreview();
+            plugin.Chat.PrintPreview();
         Help(Loc.T("Prints a summary with made-up values in your chat (only you see it), showing the values ticked above. With ultimate phase summaries on, a phase summary too."));
 
         if (changed)

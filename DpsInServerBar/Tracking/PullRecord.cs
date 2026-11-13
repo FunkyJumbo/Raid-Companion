@@ -22,7 +22,6 @@ public sealed class PullRecord
     public string Title { get; set; } = string.Empty;
     public string Zone { get; set; } = string.Empty;
     public uint TerritoryId { get; set; }
-    public string Source { get; set; } = string.Empty;
     public double DurationSeconds { get; set; }
     public PullOutcome Outcome { get; set; }
 

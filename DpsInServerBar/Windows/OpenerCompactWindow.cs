@@ -30,7 +30,10 @@ public sealed class OpenerCompactWindow : Window
         this.full = full;
         RespectCloseHotkey = false;
         AllowBackgroundBlur = false;
+        shot = new WindowShot(this);
     }
+
+    private readonly WindowShot shot;
 
     public override void OnOpen() => plugin.UpdateOpenerTracking();
 
@@ -48,6 +51,7 @@ public sealed class OpenerCompactWindow : Window
         // The border fades with the background: no frame left around the icons once the background is gone.
         var opacity = Math.Clamp(plugin.Configuration.OpenerOpacity, 0f, 1f);
         colorScope = ImRaii.PushColor(ImGuiCol.Border, Theme.Alpha(Theme.Line, Theme.Line.W * opacity));
+        shot.PreDraw();
     }
 
     public override void PostDraw()
@@ -62,6 +66,7 @@ public sealed class OpenerCompactWindow : Window
 
     public override void Draw()
     {
+        shot.Step();
         ImGui.SetWindowFontScale(Scale);
         DrawMenu();
         full.DrawCompact();
@@ -69,7 +74,7 @@ public sealed class OpenerCompactWindow : Window
 
     private float Scale => Math.Clamp(plugin.Configuration.OpenerCompactScale, 0.5f, 1.5f);
 
-    /// <summary>Right click menu: size, background opacity, full view, close.</summary>
+    /// <summary>Right click menu: size, background opacity, full view, screenshot, close.</summary>
     private void DrawMenu()
     {
         var config = plugin.Configuration;
@@ -116,6 +121,8 @@ public sealed class OpenerCompactWindow : Window
         ImGui.Separator();
         if (ImGui.MenuItem(Loc.T("Full view")))
             plugin.SetOpenerCompact(false);
+        if (ImGui.MenuItem(Loc.T("Screenshot"), false, shot.Ready))
+            shot.Request(Loc.T("Opener practice"));
         if (ImGui.MenuItem(Loc.T("Close")))
             plugin.CloseOpener();
     }

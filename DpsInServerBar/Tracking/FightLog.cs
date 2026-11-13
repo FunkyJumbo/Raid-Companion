@@ -35,7 +35,7 @@ public sealed class FightLog
 
     private readonly IObjectTable objectTable;
     private readonly IPartyList partyList;
-    private readonly ICondition condition;
+    private readonly CombatClock combat;
     private readonly IDataManager dataManager;
 
     private readonly List<(DateTime At, string Caster, uint ActionId, string Action, float CastSeconds)> casts = [];
@@ -45,13 +45,12 @@ public sealed class FightLog
     private readonly HashSet<(uint, uint, uint)> seen = [];
     private readonly Dictionary<uint, (bool Detrimental, string Name)> statuses = new();
     private readonly Dictionary<uint, string> actionNames = new();
-    private bool wasInCombat;
 
-    public FightLog(IObjectTable objectTable, IPartyList partyList, ICondition condition, IDataManager dataManager)
+    public FightLog(IObjectTable objectTable, IPartyList partyList, CombatClock combat, IDataManager dataManager)
     {
         this.objectTable = objectTable;
         this.partyList = partyList;
-        this.condition = condition;
+        this.combat = combat;
         this.dataManager = dataManager;
     }
 
@@ -59,21 +58,20 @@ public sealed class FightLog
     public void Update()
     {
         var now = DateTime.UtcNow;
-        var inCombat = condition[ConditionFlag.InCombat];
-        if (inCombat && !wasInCombat)
+        var inCombat = combat.InCombat;
+        if (combat.Started)
         {
             casts.Clear();
             casting.Clear();
             debuffs.Clear();
             open.Clear();
         }
-        else if (!inCombat && wasInCombat)
+        else if (combat.Ended)
         {
             // What is still on when the fight ends stays open: "until the end".
             open.Clear();
         }
 
-        wasInCombat = inCombat;
         if (!inCombat)
             return;
 

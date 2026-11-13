@@ -3,7 +3,7 @@ using Dalamud.Game.Text.SeStringHandling;
 
 namespace DpsInServerBar.Display;
 
-/// <summary>Maps English job abbreviations (as sent by ACT, e.g. "DRK") to the game's inline job icons.</summary>
+/// <summary>Maps English job abbreviations (e.g. "DRK") to the game's inline job icons.</summary>
 public static class JobIcons
 {
     private static readonly Dictionary<string, BitmapFontIcon> Icons = new()

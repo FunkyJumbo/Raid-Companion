@@ -53,21 +53,20 @@ public sealed class PositionalTracker
     };
 
     private readonly IObjectTable objectTable;
-    private readonly ICondition condition;
+    private readonly CombatClock combat;
     private readonly IDataManager dataManager;
     private readonly IPluginLog log;
     private readonly List<PositionalUse> uses = [];
     private readonly HashSet<(uint, byte)> loggedUnknown = [];
-    private bool wasInCombat;
     private DateTime combatStartUtc;
     private int revision;
     private int publishedRevision = -1;
     private IReadOnlyList<PositionalUse> published = [];
 
-    public PositionalTracker(IObjectTable objectTable, ICondition condition, IDataManager dataManager, IPluginLog log)
+    public PositionalTracker(IObjectTable objectTable, CombatClock combat, IDataManager dataManager, IPluginLog log)
     {
         this.objectTable = objectTable;
-        this.condition = condition;
+        this.combat = combat;
         this.dataManager = dataManager;
         this.log = log;
     }
@@ -93,21 +92,20 @@ public sealed class PositionalTracker
     /// <summary>Called every frame.</summary>
     public void Update()
     {
-        var inCombat = condition[ConditionFlag.InCombat];
-        if (inCombat && !wasInCombat)
+        var inCombat = combat.InCombat;
+        if (combat.Started)
         {
             uses.Clear();
             combatStartUtc = DateTime.UtcNow;
             revision++;
         }
 
-        wasInCombat = inCombat;
     }
 
     /// <summary>One of your actions hit an enemy (first target), with the potency bonus the game reported.</summary>
     public void OnHit(uint actionId, byte bonusPercent, uint targetId)
     {
-        if (!wasInCombat || uses.Count >= MaxUses || !Defs.TryGetValue(actionId, out var def))
+        if (!combat.InCombat || uses.Count >= MaxUses || !Defs.TryGetValue(actionId, out var def))
             return;
 
         bool hit;

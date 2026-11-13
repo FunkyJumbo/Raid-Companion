@@ -50,8 +50,8 @@ public sealed class DtrController : IDisposable
             return;
         }
 
-        var source = plugin.Sources.Current;
-        var snapshot = plugin.Sources.Latest;
+        var source = plugin.Tracker;
+        var snapshot = plugin.Tracker.Latest;
 
         var state = BuildState(source, snapshot);
         var key = $"{state.Key}|{source.Name}|{source.StatusText}";
@@ -100,7 +100,7 @@ public sealed class DtrController : IDisposable
     private Segment PreviewSegment(BarElement element, Configuration config)
     {
         Vector4? good = config.UseColors ? config.AboveThresholdColor : null;
-        var job = plugin.Sources.Latest?.You is { HasJob: true } you ? you.Job : "DRK";
+        var job = plugin.Tracker.Latest?.You is { HasJob: true } you ? you.Job : "DRK";
         var label = MetricLabel(config.Metric);
         return element switch
         {
@@ -142,7 +142,7 @@ public sealed class DtrController : IDisposable
     /// <param name="Glue">Followed by a plain space instead of the separator (the icon and the end marker belong to what follows).</param>
     private readonly record struct Segment(string Text, BitmapFontIcon Icon = BitmapFontIcon.None, Vector4? Color = null, bool Glue = false);
 
-    private RenderState BuildState(ICombatSource source, CombatSnapshot? snapshot)
+    private RenderState BuildState(Native.NativeCombatTracker source, CombatSnapshot? snapshot)
     {
         var config = plugin.Configuration;
         var label = MetricLabel(config.Metric);
@@ -389,7 +389,7 @@ public sealed class DtrController : IDisposable
         return builder.ToReadOnlySeString().ToDalamudString();
     }
 
-    private SeString BuildTooltip(ICombatSource source, CombatSnapshot? snapshot)
+    private SeString BuildTooltip(Native.NativeCombatTracker source, CombatSnapshot? snapshot)
     {
         var config = plugin.Configuration;
         var sb = new StringBuilder();

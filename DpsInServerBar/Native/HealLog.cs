@@ -77,7 +77,7 @@ public sealed class HealLog
 
         if (!byOwner.TryGetValue(ownerId, out var entry))
         {
-            entry = new Entry(name, job.ToUpperInvariant(), isYou);
+            entry = new Entry(name, job, isYou);
             byOwner[ownerId] = entry;
         }
 

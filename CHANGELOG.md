@@ -3,6 +3,14 @@
 <!-- One "## <version>" section per release. The Release workflow publishes the section of the tagged
      version as the GitHub release notes; the same notes go into pluginmaster.json (shown in Dalamud). -->
 
+## 1.0.5.0
+- Opener editor: make your own openers, edit a copy of a built-in one, record one by playing it, and share them with a code (/raidcompanion opener edit, or the pencil in the opener practice).
+- Screenshots of the settings, the compact DPS meter and the opener practice (full and compact).
+- New plugin icon.
+- Lighter on performance during fights.
+- Various UI changes and adjustments.
+- Dno dymgehk eh lryd. Ryja vih.
+
 ## 1.0.4.0
 
 - Removed: ACT support and the FFLogs percentile. The plugin now only uses its built-in tracker and makes no network connection. FFLogs credentials saved in the settings are deleted.

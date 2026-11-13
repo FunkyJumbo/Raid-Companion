@@ -37,7 +37,7 @@ public sealed unsafe class ComboTracker
     private const int MaxMistakes = 300;
 
     private readonly IObjectTable objectTable;
-    private readonly ICondition condition;
+    private readonly CombatClock combat;
     private readonly IDataManager dataManager;
 
     // Per action of the job: the step it follows (0 for a combo start), and the steps that can follow it.
@@ -56,16 +56,15 @@ public sealed unsafe class ComboTracker
     private readonly Dictionary<uint, uint> baseOf = new();
 
     private readonly List<ComboMistake> mistakes = [];
-    private bool wasInCombat;
     private DateTime combatStartUtc;
     private int revision;
     private int publishedRevision = -1;
     private IReadOnlyList<ComboMistake> published = [];
 
-    public ComboTracker(IObjectTable objectTable, ICondition condition, IDataManager dataManager)
+    public ComboTracker(IObjectTable objectTable, CombatClock combat, IDataManager dataManager)
     {
         this.objectTable = objectTable;
-        this.condition = condition;
+        this.combat = combat;
         this.dataManager = dataManager;
     }
 
@@ -90,15 +89,14 @@ public sealed unsafe class ComboTracker
     /// <summary>Called every frame: remembers the combo in progress.</summary>
     public void Update()
     {
-        var inCombat = condition[ConditionFlag.InCombat];
-        if (inCombat && !wasInCombat)
+        var inCombat = combat.InCombat;
+        if (combat.Started)
         {
             mistakes.Clear();
             combatStartUtc = DateTime.UtcNow;
             revision++;
         }
 
-        wasInCombat = inCombat;
 
         var player = objectTable.LocalPlayer;
         if (player is null)
@@ -138,7 +136,7 @@ public sealed unsafe class ComboTracker
     public void OnActionUsed(uint actionId)
     {
         actionSinceLastFrame = true;
-        if (!wasInCombat || mistakes.Count >= MaxMistakes || preserves.Contains(actionId))
+        if (!combat.InCombat || mistakes.Count >= MaxMistakes || preserves.Contains(actionId))
             return;
 
         var isStep = previous.TryGetValue(actionId, out var before);

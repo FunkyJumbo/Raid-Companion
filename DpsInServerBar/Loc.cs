@@ -84,13 +84,23 @@ public static class Loc
             var result = table.TryGetValue(visible, out var translated) && translated.Length > 0 ? translated : visible;
             if (hash >= 0)
                 result += text[hash..];
-            Cache[text] = result;
+            Remember(text, result);
             return result;
         }
     }
 
     /// <summary>A name from the game data (action, status, item) in the current language: ciphered in Al Bhed.</summary>
     public static string Game(string name) => Code == "al" ? AlBhed(name) : name;
+
+    // Texts built at run time (encounter names...) also land in the cache: it starts over rather than grow forever.
+    private const int MaxCached = 4000;
+
+    private static void Remember(string text, string result)
+    {
+        if (Cache.Count >= MaxCached)
+            Cache.Clear();
+        Cache[text] = result;
+    }
 
     // English -> Al Bhed, letter by letter (A->Y, B->P, C->L...).
     private const string AlBhedLetters = "YPLTAVKREZGMSHUBXNCDIJFQOW";
@@ -105,22 +115,22 @@ public static class Loc
             // What follows "##" is an ImGui id, kept as it is.
             var hash = text.IndexOf("##", StringComparison.Ordinal);
             var result = hash >= 0 ? AlBhed(text[..hash]) + text[hash..] : AlBhed(text);
-            Cache[text] = result;
+            Remember(text, result);
             return result;
         }
     }
 
-    /// <summary>The text in Al Bhed. Format items ({0}, {1:0.0%}) are kept as they are.</summary>
-    public static string AlBhed(string text)
+    /// <summary>The text in Al Bhed. Format items ({0}, {1:0.0%}) are kept as they are, unless told otherwise (chat text).</summary>
+    public static string AlBhed(string text, bool keepFormatItems = true)
     {
         var chars = text.ToCharArray();
         var depth = 0;
         for (var i = 0; i < chars.Length; i++)
         {
             var c = chars[i];
-            if (c == '{')
+            if (keepFormatItems && c == '{')
                 depth++;
-            else if (c == '}')
+            else if (keepFormatItems && c == '}')
                 depth = Math.Max(0, depth - 1);
             else if (depth == 0 && c is >= 'a' and <= 'z')
                 chars[i] = char.ToLowerInvariant(AlBhedLetters[c - 'a']);

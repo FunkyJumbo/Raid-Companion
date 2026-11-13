@@ -46,7 +46,7 @@ public sealed class DotTracker
     };
 
     private readonly IObjectTable objectTable;
-    private readonly ICondition condition;
+    private readonly CombatClock combat;
     private readonly IDataManager dataManager;
     private readonly Func<bool> enemyTargetable;
     private readonly Func<uint> bossId;
@@ -62,16 +62,15 @@ public sealed class DotTracker
     private List<DotDrop>[] drops = [];
     private DateTime combatStartUtc;
     private const double MinDropSeconds = 1;
-    private bool wasInCombat;
     private DateTime lastFrameUtc;
     private int revision;
     private int publishedRevision = -1;
     private IReadOnlyList<DotUptime> published = [];
 
-    public DotTracker(IObjectTable objectTable, ICondition condition, IDataManager dataManager, Func<bool> enemyTargetable, Func<uint> bossId)
+    public DotTracker(IObjectTable objectTable, CombatClock combat, IDataManager dataManager, Func<bool> enemyTargetable, Func<uint> bossId)
     {
         this.objectTable = objectTable;
-        this.condition = condition;
+        this.combat = combat;
         this.dataManager = dataManager;
         this.enemyTargetable = enemyTargetable;
         this.bossId = bossId;
@@ -99,9 +98,9 @@ public sealed class DotTracker
     public void Update()
     {
         var now = DateTime.UtcNow;
-        var inCombat = condition[ConditionFlag.InCombat];
+        var inCombat = combat.InCombat;
         var player = objectTable.LocalPlayer;
-        if (inCombat && !wasInCombat)
+        if (combat.Started)
         {
             dots = player is not null && Dots.TryGetValue(player.ClassJob.RowId, out var list) ? list : [];
             active = new double[dots.Length];
@@ -115,7 +114,6 @@ public sealed class DotTracker
             revision++;
         }
 
-        wasInCombat = inCombat;
         var dt = (now - lastFrameUtc).TotalSeconds;
         lastFrameUtc = now;
         if (!inCombat || dots.Length == 0 || player is null || dt <= 0 || dt > 1 || !enemyTargetable())

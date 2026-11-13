@@ -53,14 +53,13 @@ public sealed unsafe class UptimeTracker
     private static readonly TimeSpan ScanInterval = TimeSpan.FromMilliseconds(100);
 
     private readonly IObjectTable objectTable;
-    private readonly ICondition condition;
+    private readonly CombatClock combat;
     private readonly Func<int?> currentPhase;
 
     private readonly List<float> availableBySecond = [];
     private readonly List<float> activeBySecond = [];
     private readonly Dictionary<int, (double Available, double Active)> byPhase = new();
 
-    private bool wasInCombat;
     private DateTime combatStartUtc;
     private DateTime lastFrameUtc;
     private DateTime nextScanUtc;
@@ -69,6 +68,8 @@ public sealed unsafe class UptimeTracker
     private double active;
     private int revision;
     private int publishedRevision = -1;
+    private static readonly TimeSpan PublishInterval = TimeSpan.FromMilliseconds(250);
+    private DateTime nextPublishUtc;
 
     // GCD analysis.
     private readonly List<GcdGap> gaps = [];
@@ -100,10 +101,10 @@ public sealed unsafe class UptimeTracker
     // Your last actions (from the action effect hook), to tell which oGCD caused a clip.
     private readonly List<(uint ActionId, DateTime TimeUtc)> recentActions = [];
 
-    public UptimeTracker(IObjectTable objectTable, ICondition condition, Func<int?> currentPhase)
+    public UptimeTracker(IObjectTable objectTable, CombatClock combat, Func<int?> currentPhase)
     {
         this.objectTable = objectTable;
-        this.condition = condition;
+        this.combat = combat;
         this.currentPhase = currentPhase;
     }
 
@@ -111,19 +112,18 @@ public sealed unsafe class UptimeTracker
     public UptimeState? Current { get; private set; }
 
     /// <summary>Whether an enemy can be attacked right now (read a few times per second, in combat).</summary>
-    public bool EnemyTargetable => wasInCombat && enemyTargetable;
+    public bool EnemyTargetable => combat.InCombat && enemyTargetable;
 
     /// <summary>Called every frame.</summary>
     public void Update()
     {
         var now = DateTime.UtcNow;
-        var inCombat = condition[ConditionFlag.InCombat];
+        var inCombat = combat.InCombat;
 
-        if (inCombat && !wasInCombat)
+        if (combat.Started)
             Reset(now);
-        else if (!inCombat && wasInCombat)
+        else if (combat.Ended)
             CloseGap();
-        wasInCombat = inCombat;
 
         if (!inCombat)
             return;
@@ -200,6 +200,12 @@ public sealed unsafe class UptimeTracker
         if (publishedRevision == revision)
             return Current;
 
+        // In combat it changes every frame: rebuilt a few times per second only. Out of combat, the final state.
+        var now = DateTime.UtcNow;
+        if (combat.InCombat && Current is not null && now < nextPublishUtc)
+            return Current;
+
+        nextPublishUtc = now + PublishInterval;
         publishedRevision = revision;
         var gcd = new GcdAnalysis(
             gcdCount, gcdCount > 0 ? recastSum / gcdCount : 0,
@@ -232,6 +238,7 @@ public sealed unsafe class UptimeTracker
         lastGcdStartUtc = previousGcdStartUtc = now;
         gcdStartedNow = false;
         revision++;
+        nextPublishUtc = now; // the new fight shows at once, not the end of the last one
     }
 
     /// <summary>Counts each new GCD (its recast restarting); returns whether the GCD is rolling.</summary>

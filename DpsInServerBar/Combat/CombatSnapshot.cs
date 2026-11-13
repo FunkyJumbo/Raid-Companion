@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace DpsInServerBar.Combat;
 
-/// <summary>State of the current encounter, from any source. Immutable, safe to share across threads.</summary>
+/// <summary>State of the current encounter. Immutable, safe to share across threads.</summary>
 public sealed record CombatSnapshot(
     EncounterInfo Encounter,
     IReadOnlyList<CombatantInfo> Combatants,
@@ -14,7 +14,7 @@ public sealed record CombatSnapshot(
     // Computed on access rather than stored: a stored value would be copied unchanged by `with { Combatants = ... }`.
     public CombatantInfo? You => Combatants.FirstOrDefault(c => c.IsYou);
 
-    /// <summary>When the encounter started; used to tell whether two sources are describing the same fight.</summary>
+    /// <summary>When the encounter started.</summary>
     public DateTime StartUtc { get; init; } = ReceivedAtUtc - Encounter.Duration;
 
     /// <summary>Sum of the party members' DPS (players with a job), optionally including the Limit Break.</summary>
@@ -69,9 +69,8 @@ public sealed record CombatantInfo(
     string Job,
     double EncDps,
 
-    /// <summary>Raid-contributed DPS (FFLogs-style), NaN when the source cannot compute it.</summary>
+    /// <summary>Raid-contributed DPS (FFLogs-style), NaN when it cannot be computed.</summary>
     double RDps,
-    double EncHps,
     double Damage,
     double DamagePercent,
     double CritPercent,

@@ -27,7 +27,7 @@ public sealed class GaugeTracker
 
     private readonly IJobGauges gauges;
     private readonly IObjectTable objectTable;
-    private readonly ICondition condition;
+    private readonly CombatClock combat;
     private readonly IDataManager dataManager;
 
     // Gains learned per job, gauge and action (kept for the session): every gain seen.
@@ -35,17 +35,16 @@ public sealed class GaugeTracker
 
     private readonly Dictionary<string, ResourceState> states = new();
     private string job = string.Empty;
-    private bool wasInCombat;
     private DateTime lastFrameUtc;
     private int revision;
     private int publishedRevision = -1;
     private IReadOnlyList<GaugeWaste> published = [];
 
-    public GaugeTracker(IJobGauges gauges, IObjectTable objectTable, ICondition condition, IDataManager dataManager)
+    public GaugeTracker(IJobGauges gauges, IObjectTable objectTable, CombatClock combat, IDataManager dataManager)
     {
         this.gauges = gauges;
         this.objectTable = objectTable;
-        this.condition = condition;
+        this.combat = combat;
         this.dataManager = dataManager;
     }
 
@@ -71,7 +70,7 @@ public sealed class GaugeTracker
     /// <summary>One of your actions landed (from the action effect hook).</summary>
     public void OnActionUsed(uint actionId)
     {
-        if (!wasInCombat)
+        if (!combat.InCombat)
             return;
 
         var now = DateTime.UtcNow;
@@ -82,19 +81,29 @@ public sealed class GaugeTracker
         }
     }
 
+    private uint currentJobId;
+    private string currentJobName = string.Empty;
+
     /// <summary>Called every frame.</summary>
     public void Update()
     {
         var now = DateTime.UtcNow;
-        var inCombat = condition[ConditionFlag.InCombat];
+        var inCombat = combat.InCombat;
         var player = objectTable.LocalPlayer;
-        var currentJob = player?.ClassJob.ValueNullable?.Abbreviation.ExtractText() ?? string.Empty;
+        // The abbreviation is only read again when the job changes.
+        var jobId = player?.ClassJob.RowId ?? 0;
+        if (jobId != currentJobId)
+        {
+            currentJobId = jobId;
+            currentJobName = player?.ClassJob.ValueNullable?.Abbreviation.ExtractText() ?? string.Empty;
+        }
 
-        if (inCombat && !wasInCombat)
+        var currentJob = currentJobName;
+
+        if (combat.Started)
             Reset(currentJob);
         else if (currentJob != job)
             Reset(currentJob);
-        wasInCombat = inCombat;
 
         var dt = (now - lastFrameUtc).TotalSeconds;
         lastFrameUtc = now;

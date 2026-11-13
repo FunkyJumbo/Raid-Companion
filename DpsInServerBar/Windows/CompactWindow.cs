@@ -30,7 +30,10 @@ public sealed class CompactWindow : Window
         this.plugin = plugin;
         AllowBackgroundBlur = false;
         RespectCloseHotkey = false;
+        shot = new WindowShot(this);
     }
+
+    private readonly WindowShot shot;
 
     public override void PreDraw()
     {
@@ -39,6 +42,7 @@ public sealed class CompactWindow : Window
         themeScope = Theme.Push();
         styleScope = ImRaii.PushStyle(ImGuiStyleVar.WindowRounding, Theme.Px(10))
                           .Push(ImGuiStyleVar.WindowPadding, Theme.Px(new Vector2(8, 7)));
+        shot.PreDraw();
     }
 
     public override void PostDraw()
@@ -51,18 +55,19 @@ public sealed class CompactWindow : Window
 
     public override void Draw()
     {
+        shot.Step();
         var config = plugin.Configuration;
         DrawMenu(config);
 
         // The window takes the size of its content: it cannot be resized by hand.
-        var snapshot = plugin.Sources.Latest;
+        var snapshot = plugin.Tracker.Latest;
         if (snapshot is not null)
             DrawTable(snapshot, config);
         else
             Theme.Hint(Loc.T("No combat data yet."));
     }
 
-    /// <summary>Right click menu: metric, opacity, main window, history, settings, close.</summary>
+    /// <summary>Right click menu: metric, opacity, main window, history, settings, screenshot, close.</summary>
     private void DrawMenu(Configuration config)
     {
         if (ImGui.IsWindowHovered(ImGuiHoveredFlags.RootAndChildWindows) && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
@@ -104,6 +109,8 @@ public sealed class CompactWindow : Window
             plugin.ShowMainWindow(history: true);
         if (ImGui.MenuItem(Loc.T("Settings")))
             plugin.OpenCompactSettings();
+        if (ImGui.MenuItem(Loc.T("Screenshot"), false, shot.Ready))
+            shot.Request(Loc.T("DPS meter"));
         if (ImGui.MenuItem(Loc.T("Close")))
             plugin.SetCompact(false);
     }

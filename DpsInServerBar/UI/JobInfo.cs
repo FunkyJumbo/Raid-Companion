@@ -9,7 +9,7 @@ using Lumina.Excel.Sheets;
 
 namespace DpsInServerBar.UI;
 
-/// <summary>Job icon and role color from an English job abbreviation (as sent by ACT, e.g. "DRK").</summary>
+/// <summary>Job icon and role color from an English job abbreviation (e.g. "DRK").</summary>
 public static class JobInfo
 {
     // Framed job icons: 62100 + ClassJob row.

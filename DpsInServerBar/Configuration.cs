@@ -267,6 +267,9 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>Language of the plugin: auto (Dalamud's), en, fr or de.</summary>
     public string Language { get; set; } = "auto";
 
+    /// <summary>Easter egg: in Al Bhed, what you type in chat is sent in Al Bhed (the others read it ciphered).</summary>
+    public bool AlBhedSendChat { get; set; } = true;
+
     /// <summary>Opener practice: countdown before the pull when pressing Start, in seconds (5 to 16).</summary>
     public int OpenerCountdown
     {
@@ -302,6 +305,10 @@ public sealed class Configuration : IPluginConfiguration
 
     /// <summary>Opener practice: opener chosen for each job (job abbreviation to opener id).</summary>
     public Dictionary<string, string> OpenerSelected { get; set; } = new();
+
+    /// <summary>Openers made in the opener editor (new, copied or imported).</summary>
+    [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+    public List<Opener.CustomOpener> CustomOpeners { get; set; } = [];
 
     /// <summary>Columns of the compact meter shown after the player and the DPS / rDPS.</summary>
     public CompactColumn CompactColumns { get; set; } = CompactColumn.Share | CompactColumn.Deaths;

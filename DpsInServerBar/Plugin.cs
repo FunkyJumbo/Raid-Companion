@@ -44,8 +44,12 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ConfigWindow configWindow;
     private readonly CompactWindow compactWindow;
     private readonly OpenerWindow openerWindow;
+    private readonly OpenerEditorWindow openerEditorWindow;
+    private readonly UI.AlBhedChat alBhedChat;
+    private readonly UI.AlBhedSender alBhedSender;
     private readonly OpenerCompactWindow openerCompactWindow;
     private readonly DtrController dtr;
+    private readonly CombatClock combat;
 
     private DateTime nextRefresh = DateTime.MinValue;
 
@@ -54,32 +58,36 @@ public sealed class Plugin : IDalamudPlugin
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
         if (Configuration.Migrate())
             Configuration.Save();
-        UI.Theme.Configure(Configuration);
-        UI.Names.Anonymize = Configuration.HideNames;
-        Loc.Set(Configuration.Language, PluginInterface.UiLanguage);
+        ApplyConfiguration();
 
+        DeleteLeftovers();
+        combat = new CombatClock(Condition);
         var native = new NativeCombatTracker(GameInterop, ObjectTable, PartyList, Condition, ClientState, DataManager, PlayerState, Log);
         native.Mistakes.IgnoreTankbusters = Configuration.MistakesIgnoreTankbusters;
-        Sources = new CombatSourceManager(native);
-        History = new PullHistory(PluginInterface.GetPluginConfigDirectory(), Log);
-        Pulls = new PullTracker(this, DutyState, Condition, ChatGui);
+        Tracker = native;
+        History = new PullHistory(PluginInterface.GetPluginConfigDirectory(), (e, message) => Log.Error(e, message));
+        Chat = new ChatSummary(this, ChatGui);
+        Pulls = new PullTracker(this, DutyState, Condition, Chat);
+        alBhedChat = new UI.AlBhedChat(ChatGui);
+        alBhedSender = new UI.AlBhedSender(GameInterop, Log);
+        UpdateAlBhedChat();
         Boss = new BossTracker(ObjectTable, Condition, DataManager);
-        FightLog = new FightLog(ObjectTable, PartyList, Condition, DataManager);
+        FightLog = new FightLog(ObjectTable, PartyList, combat, DataManager);
         Ultimates = new UltimateTracker(Configuration, ObjectTable, Condition, ClientState, DataManager);
         Ultimates.PhaseEnded += OnPhaseEnded;
         ContentCategories = new ContentCategories(DataManager);
         Fights = new FightCatalog(DataManager);
-        Uptime = new UptimeTracker(ObjectTable, Condition, () => Ultimates.Current is { Started: true, InCombat: true } p ? p.Number : null);
-        Gauges = new GaugeTracker(JobGauges, ObjectTable, Condition, DataManager);
+        Uptime = new UptimeTracker(ObjectTable, combat, () => Ultimates.Current is { Started: true, InCombat: true } p ? p.Number : null);
+        Gauges = new GaugeTracker(JobGauges, ObjectTable, combat, DataManager);
         native.LocalActionUsed += Gauges.OnActionUsed;
         native.LocalActionUsed += Uptime.OnActionUsed;
-        Combos = new ComboTracker(ObjectTable, Condition, DataManager);
+        Combos = new ComboTracker(ObjectTable, combat, DataManager);
         native.LocalActionUsed += Combos.OnActionUsed;
-        Positionals = new PositionalTracker(ObjectTable, Condition, DataManager, Log);
+        Positionals = new PositionalTracker(ObjectTable, combat, DataManager, Log);
         native.LocalDamage += Positionals.OnHit;
-        Dots = new DotTracker(ObjectTable, Condition, DataManager, () => Uptime.EnemyTargetable, () => Boss.Current?.EntityId ?? 0);
+        Dots = new DotTracker(ObjectTable, combat, DataManager, () => Uptime.EnemyTargetable, () => Boss.Current?.EntityId ?? 0);
         native.TankSwaps.BossId = () => Boss.Current?.EntityId ?? 0;
-        OpenerTracker = new OpenerTracker(GameInterop, ObjectTable, Log);
+        OpenerTracker = new OpenerTracker(native);
         dtr = new DtrController(this, DtrBar);
 
         mainWindow = new MainWindow(this);
@@ -89,13 +97,15 @@ public sealed class Plugin : IDalamudPlugin
         windowSystem.AddWindow(configWindow);
         openerWindow = new OpenerWindow(this);
         openerCompactWindow = new OpenerCompactWindow(this, openerWindow);
+        openerEditorWindow = new OpenerEditorWindow(this);
         windowSystem.AddWindow(compactWindow);
         windowSystem.AddWindow(openerWindow);
+        windowSystem.AddWindow(openerEditorWindow);
         windowSystem.AddWindow(openerCompactWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = Loc.T("Open the main window. Subcommands: config, toggle, history, compact, opener [compact|full], preset <number|name|next>."),
+            HelpMessage = Loc.T("Open the main window. Subcommands: config, toggle, history, compact, opener [compact|full|edit], preset <number|name|next>."),
         });
         CommandManager.AddHandler(ShortCommand, new CommandInfo(OnCommand) { HelpMessage = Loc.F("Short for {0}.", CommandName) });
         CommandManager.AddHandler(LegacyCommand, new CommandInfo(OnCommand) { ShowInHelp = false });
@@ -107,13 +117,17 @@ public sealed class Plugin : IDalamudPlugin
         ClientState.TerritoryChanged += OnTerritoryChanged;
         Framework.Update += OnFrameworkUpdate;
 
-        Sources.Apply();
+        Tracker.Start();
     }
 
     public Configuration Configuration { get; }
-    public CombatSourceManager Sources { get; }
+    /// <summary>The built-in damage meter and its logs (deaths, heals, mitigations, mistakes, tank swaps).</summary>
+    public NativeCombatTracker Tracker { get; }
     public PullHistory History { get; }
     public PullTracker Pulls { get; }
+
+    /// <summary>What the plugin prints in chat (recaps, deaths).</summary>
+    public ChatSummary Chat { get; }
     public DtrController Bar => dtr;
     public BossTracker Boss { get; }
     public FightLog FightLog { get; }
@@ -148,8 +162,27 @@ public sealed class Plugin : IDalamudPlugin
         dtr.Dispose();
         Ultimates.PhaseEnded -= OnPhaseEnded;
         Pulls.Dispose();
+        Chat.Dispose();
+        ChatGui.RemoveChatLinkHandler(); // the screenshots folder link too
+        History.Flush();
+        alBhedChat.Dispose();
+        alBhedSender.Dispose();
         OpenerTracker.Dispose();
-        Sources.Dispose();
+        Tracker.Dispose();
+    }
+
+    /// <summary>Files of features that no longer exist (the FFLogs percentile cache).</summary>
+    private static void DeleteLeftovers()
+    {
+        try
+        {
+            foreach (var file in System.IO.Directory.GetFiles(PluginInterface.GetPluginConfigDirectory(), "fflogs-cache*.json"))
+                System.IO.File.Delete(file);
+        }
+        catch (Exception e)
+        {
+            Log.Warning(e, "Could not delete the old FFLogs cache");
+        }
     }
 
     public void ToggleMainUi() => mainWindow.Toggle();
@@ -182,6 +215,16 @@ public sealed class Plugin : IDalamudPlugin
             SetOpenerCompact(compact);
     }
 
+    /// <summary>Opens the opener practice in the view last used (does nothing if it is open).</summary>
+    public void OpenOpener()
+    {
+        if (!OpenerOpen)
+            ToggleOpener();
+    }
+
+    /// <summary>Opens the opener editor on a job and, if given, one of its openers.</summary>
+    public void OpenOpenerEditor(string job = "", string? openerId = null) => openerEditorWindow.Open(job, openerId);
+
     public void CloseOpener()
     {
         openerWindow.IsOpen = false;
@@ -197,11 +240,11 @@ public sealed class Plugin : IDalamudPlugin
         openerWindow.IsOpen = !compact;
     }
 
-    /// <summary>Your actions are only watched while one of the opener practice views is open.</summary>
+    /// <summary>Your actions are only watched while one of the opener practice views is open, or the editor records.</summary>
     public void UpdateOpenerTracking()
     {
         var open = openerWindow.IsOpen || openerCompactWindow.IsOpen;
-        OpenerTracker.Enabled = open;
+        OpenerTracker.Enabled = open || openerEditorWindow.Recording;
         if (!open)
             openerWindow.ResetRun();
     }
@@ -237,29 +280,49 @@ public sealed class Plugin : IDalamudPlugin
         OnConfigChanged();
     }
 
-    private void OnLanguageChanged(string language) => Loc.Set(Configuration.Language, language);
+    private void OnLanguageChanged(string language)
+    {
+        Loc.Set(Configuration.Language, language);
+        UpdateAlBhedChat();
+    }
+
+    /// <summary>Sending chat in Al Bhed: only in Al Bhed with the option on. Then your messages are not ciphered again on display.</summary>
+    private void UpdateAlBhedChat()
+    {
+        var send = Loc.Code == "al" && Configuration.AlBhedSendChat;
+        alBhedSender.Enabled = send;
+        alBhedChat.SentInAlBhed = send;
+    }
 
     private void OnTerritoryChanged(uint territory) => InstanceRun = Guid.NewGuid();
 
     public void OnConfigChanged()
     {
         Configuration.Save();
+        ApplyConfiguration();
+        UpdateAlBhedChat();
+        dtr.Invalidate();
+        Tracker.Mistakes.IgnoreTankbusters = Configuration.MistakesIgnoreTankbusters;
+    }
+
+    /// <summary>The settings read by static helpers: theme, made-up names, language.</summary>
+    private void ApplyConfiguration()
+    {
         UI.Theme.Configure(Configuration);
         UI.Names.Anonymize = Configuration.HideNames;
         Loc.Set(Configuration.Language, PluginInterface.UiLanguage);
-        dtr.Invalidate();
-        Sources.Native.Mistakes.IgnoreTankbusters = Configuration.MistakesIgnoreTankbusters;
     }
 
     private void OnPhaseEnded(PhaseResult result)
     {
         if (Configuration.ChatSummary && Configuration.ChatSummaryPhases)
-            Pulls.PrintPhaseSummary(result);
+            Chat.PrintPhaseSummary(result);
     }
 
     private void OnFrameworkUpdate(IFramework framework)
     {
-        Sources.Tick();
+        combat.Update();
+        Tracker.Tick();
         Uptime.Update();
         Gauges.Update();
         Positionals.Update();
@@ -267,7 +330,7 @@ public sealed class Plugin : IDalamudPlugin
         Combos.Update();
         FightLog.Update();
 
-        // The bar only needs a few refreshes per second; sources publish roughly once per second.
+        // The bar only needs a few refreshes per second; the tracker publishes roughly once per second.
         var now = DateTime.UtcNow;
         if (now < nextRefresh)
             return;
@@ -276,8 +339,8 @@ public sealed class Plugin : IDalamudPlugin
         Boss.Update();
         Ultimates.Update();
 
-        var source = Sources.Current;
-        Pulls.Update(Sources.Latest, source.Name);
+        Pulls.Update(Tracker.Latest);
+        History.Update();
         dtr.Update();
     }
 
@@ -353,6 +416,10 @@ public sealed class Plugin : IDalamudPlugin
                 break;
             case "opener full":
                 ToggleOpenerView(compact: false);
+                break;
+            case "opener edit":
+            case "opener editor":
+                OpenOpenerEditor();
                 break;
             default:
                 ToggleMainUi();

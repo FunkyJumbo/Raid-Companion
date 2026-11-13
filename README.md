@@ -241,6 +241,9 @@ Right click the Live, History or Progression tab and choose **Screenshot**: the 
 captured in slices put back together). Pair it with **Hide player names** (Settings > Display) to share it without
 real names: every player gets a made-up name, always the same one.
 
+The other windows too: the camera in the title bar of the settings (the whole page) and of the opener practice,
+or **Screenshot** in the right click menu of the compact DPS meter and of the compact opener practice.
+
 <br>
 
 ## Chat summary
@@ -323,6 +326,17 @@ when in combat, where the game refuses it.
 
 </details>
 
+### Opener editor
+
+Make your own openers, or change a copy of a built-in one, with the pencil next to the opener list (or
+`/raidcompanion opener edit`). Add the job's actions from a searchable list (GCD or oGCD is read from the game), the
+tincture, reorder the steps, set the pre-pull ones with their time before the pull, and write your notes. Or press
+**Record** and play the opener on a striking dummy: each action you use is added, with the time before the pull for
+the pre-pull ones. Your openers show up in the opener practice next to the built-in ones.
+
+**Share** an opener with **Copy share code**: the code holds the whole opener, paste it in a chat or a Discord message.
+The other player pastes it in their editor and presses **Import**.
+
 <br>
 
 ## Commands
@@ -338,6 +352,7 @@ when in combat, where the game refuses it.
 | `/raidcompanion opener` | Open / close the opener practice (in the view used last) |
 | `/raidcompanion opener compact` | Open / close the opener practice in its compact view |
 | `/raidcompanion opener full` | Open / close the opener practice in its full window |
+| `/raidcompanion opener edit` | Open the opener editor: make, change and share your openers |
 
 `/rcomp` is a shorter alias (e.g. `/rcomp preset 2`, handy in a macro). The old `/dpsbar` still works, so existing
 macros keep working.
@@ -379,7 +394,7 @@ during combat.
 
 **Where it goes.** Nowhere but your computer.
 
-- Recorded pulls are saved in `history.json`, in the plugin's configuration folder
+- Recorded pulls are saved in the `pulls` folder (one file per pull), in the plugin's configuration folder
   (`%AppData%\XIVLauncher\pluginConfigs\DpsInServerBar\`). They include your party members' names. Choose what is
   recorded in Settings > Pulls history; delete a pull with its bin icon, or everything with **Clear all** (hold Ctrl).
 - Screenshots go to `Pictures\Raid Companion`, only when you ask for one.

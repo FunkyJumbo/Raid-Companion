@@ -81,7 +81,7 @@ public sealed class MitigationLog
         if (!wasInCombat || uses.Count >= MaxUses || !Actions.TryGetValue(actionId, out var name))
             return;
 
-        uses.Add(new MitigationUse((DateTime.UtcNow - startUtc).TotalSeconds, player, job.ToUpperInvariant(), isYou, actionId, name));
+        uses.Add(new MitigationUse((DateTime.UtcNow - startUtc).TotalSeconds, player, job, isYou, actionId, name));
         revision++;
     }
 
