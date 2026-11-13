@@ -328,6 +328,11 @@ when in combat, where the game refuses it.
 
 ### Opener editor
 
+<p align="center">
+  <img src="docs/images/opener-editor.png" width="560" alt="The opener editor on Pictomancer: the built-in openers and yours on the left, the steps of your opener with their kind and pre-pull time, the job's actions to add, and the notes"><br>
+  <sub>A Pictomancer opener of your own: its steps, the job's actions to add and the notes.</sub>
+</p>
+
 Make your own openers, or change a copy of a built-in one, with the pencil next to the opener list (or
 `/raidcompanion opener edit`). Add the job's actions from a searchable list (GCD or oGCD is read from the game), the
 tincture, reorder the steps, set the pre-pull ones with their time before the pull, and write your notes. Or press
