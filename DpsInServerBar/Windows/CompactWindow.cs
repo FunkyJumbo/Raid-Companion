@@ -103,7 +103,7 @@ public sealed class CompactWindow : Window
         if (ImGui.MenuItem(Loc.T("History")))
             plugin.ShowMainWindow(history: true);
         if (ImGui.MenuItem(Loc.T("Settings")))
-            plugin.ToggleConfigUi();
+            plugin.OpenCompactSettings();
         if (ImGui.MenuItem(Loc.T("Close")))
             plugin.SetCompact(false);
     }
@@ -129,6 +129,8 @@ public sealed class CompactWindow : Window
             extras.Add((Loc.T("Crit"), "100%", c => ($"{c.CritPercent:0}%", Theme.TextMuted)));
         if (shown.HasFlag(CompactColumn.DirectHit))
             extras.Add((Loc.T("DH"), "100%", c => ($"{c.DirectHitPercent:0}%", Theme.TextMuted)));
+        if (shown.HasFlag(CompactColumn.CritDirectHit))
+            extras.Add((Loc.T("Crit DH"), "100%", c => ($"{c.CritDirectHitPercent:0}%", Theme.TextMuted)));
         if (shown.HasFlag(CompactColumn.Deaths))
             extras.Add((Loc.T("Deaths"), Loc.T("Deaths"), c => (c.Deaths.ToString(), c.Deaths > 0 ? Theme.Bad : Theme.TextFaint)));
 

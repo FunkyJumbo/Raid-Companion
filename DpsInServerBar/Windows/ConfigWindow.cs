@@ -20,23 +20,18 @@ public sealed class ConfigWindow : Window
 {
     private readonly Plugin plugin;
 
-    // Connection fields are edited locally and only applied on "Apply", to avoid reconnecting on every keystroke.
-    private string hostInput;
     private bool editingCustomSeparator;
     private string fightFilter = string.Empty;
     private int renamingTheme = -1;
     private int renamingPreset = -1;
     private bool focusRename;
     private string renameBuffer = string.Empty;
-    private int portInput;
 
     public ConfigWindow(Plugin plugin) : base(Loc.T("Raid Companion - Settings###DpsInServerBarConfig"))
     {
         Loc.Changed += () => WindowName = Loc.T("Raid Companion - Settings###DpsInServerBarConfig");
         this.plugin = plugin;
         AllowBackgroundBlur = false;
-        hostInput = plugin.Configuration.Host;
-        portInput = plugin.Configuration.Port;
         Size = new Vector2(860, 600);
         SizeCondition = ImGuiCond.FirstUseEver;
     }
@@ -46,17 +41,23 @@ public sealed class ConfigWindow : Window
 
     private Section[] Sections =>
     [
+        new(FontAwesomeIcon.Desktop, Loc.T("Display"), Loc.T("The compact meter and the main window."), DrawDisplayTab),
         new(FontAwesomeIcon.Server, Loc.T("DPS in server bar"), Loc.T("What the server bar shows, in which order, and how."), DrawServerBarTab),
         new(FontAwesomeIcon.CommentDots, Loc.T("Chat summary"), Loc.T("The recap printed in chat after each pull and each ultimate phase."), DrawChatSummaryTab),
-        new(FontAwesomeIcon.Desktop, Loc.T("Display"), Loc.T("The compact meter and the main window."), DrawDisplayTab),
-        new(FontAwesomeIcon.History, Loc.T("Pulls history"), Loc.T("Which pulls are recorded and kept."), DrawPullsTab),
         new(FontAwesomeIcon.Palette, Loc.T("Appearance"), Loc.T("Theme, colors and transparency of the plugin's windows."), DrawAppearanceTab),
+        new(FontAwesomeIcon.History, Loc.T("Pulls history"), Loc.T("Which pulls are recorded and kept."), DrawPullsTab),
         new(FontAwesomeIcon.Crosshairs, Loc.T("DPS check"), Loc.T("Boss HP and enrage of each fight: the party DPS needed to clear it."), DrawDpsCheckTab, Wip: true),
-        new(FontAwesomeIcon.Plug, Loc.T("Data source"), Loc.T("Where the damage numbers come from: ACT or the built-in tracker."), DrawSourceTab),
-        new(FontAwesomeIcon.ChartLine, Loc.T("FFLogs"), Loc.T("Estimate of your FFLogs percentile, from the FFLogs API."), DrawFflogsTab),
     ];
 
     private int selectedSection;
+
+    /// <summary>Opens the settings on the Display page (where the compact meter is set up), brought to the front.</summary>
+    public void OpenDisplay()
+    {
+        selectedSection = Array.FindIndex(Sections, s => s.Draw == (System.Action)DrawDisplayTab);
+        IsOpen = true;
+        BringToFront();
+    }
     private IDisposable? themeScope;
 
     // Height the window needs to show the whole page, from the last frame (pixels); null for a page that fills the window.
@@ -267,7 +268,8 @@ public sealed class ConfigWindow : Window
         foreach (var (column, label) in new[]
                  {
                      (CompactColumn.Share, Loc.T("% of the party")), (CompactColumn.Crit, Loc.T("Crit rate")),
-                     (CompactColumn.DirectHit, Loc.T("Direct hit rate")), (CompactColumn.Deaths, Loc.T("Deaths")),
+                     (CompactColumn.DirectHit, Loc.T("Direct hit rate")),
+                     (CompactColumn.CritDirectHit, Loc.T("Critical direct hit rate")), (CompactColumn.Deaths, Loc.T("Deaths")),
                  })
         {
             var on = c.CompactColumns.HasFlag(column);
@@ -295,7 +297,45 @@ public sealed class ConfigWindow : Window
 
         Theme.SectionHeader(Loc.T("Main window"));
         changed |= Checkbox(Loc.T("Show DPS graphs in the main window"), c.ShowGraph, v => c.ShowGraph = v);
+
+        var window = c.GraphWindowSeconds;
+        ImGui.SetNextItemWidth(Theme.Px(120));
+        if (ImGui.SliderInt(Loc.T("Rolling DPS window (s)"), ref window, 3, 60))
+        {
+            c.GraphWindowSeconds = window;
+            changed = true;
+        }
+
+        Help(Loc.T("The \"Rolling\" curve of the DPS graphs shows, at each second, your DPS over the last seconds only (this many), instead of the average since the pull. Short: every burst and dip shows, but the curve is jagged. Long: a smoother curve, the trend rather than the detail. Changes nothing else (figures, cards, recorded pulls)."));
         changed |= Checkbox(Loc.T("Include Limit Break in party DPS"), c.IncludeLimitBreakInParty, v => c.IncludeLimitBreakInParty = v);
+
+        // The figure cards at the top of Live and of a pull in History, two per line.
+        ImGui.TextColored(Theme.TextMuted, Loc.T("Cards shown in Live and History"));
+        var cards = new[]
+        {
+            (MainCard.Dps, Loc.T("DPS"), (string?)null),
+            (MainCard.Rdps, Loc.T("rDPS"), null),
+            (MainCard.Gcd, Loc.T("GCD uptime"), null),
+            (MainCard.PartyDps, Loc.T("Party DPS"), null),
+            (MainCard.BossHp, Loc.T("Boss HP"), null),
+            (MainCard.Pace, Loc.T("Pace vs best"), Loc.T("Live only.")),
+            (MainCard.Duration, Loc.T("Duration"), Loc.T("History only.")),
+        };
+        for (var i = 0; i < cards.Length; i++)
+        {
+            var (card, label, help) = cards[i];
+            if (i % 2 == 1)
+                ImGui.SameLine(Theme.Px(200));
+            var on = c.MainCards.HasFlag(card);
+            if (ImGui.Checkbox($"{label}##card{(int)card}", ref on))
+            {
+                c.MainCards = on ? c.MainCards | card : c.MainCards & ~card;
+                changed = true;
+            }
+
+            if (help is not null && ImGui.IsItemHovered())
+                ImGui.SetTooltip(help);
+        }
 
         Theme.SectionHeader(Loc.T("Screenshots"));
         changed |= Checkbox(Loc.T("Hide player names"), c.HideNames, v => { c.HideNames = v; Names.Anonymize = v; });
@@ -676,7 +716,6 @@ public sealed class ConfigWindow : Window
         (SummaryElement.Job, Loc.T("Job")),
         (SummaryElement.Dps, Loc.T("DPS")),
         (SummaryElement.Rdps, Loc.T("rDPS")),
-        (SummaryElement.Percentile, Loc.T("FFLogs %")),
         (SummaryElement.Uptime, Loc.T("GCD")),
         (SummaryElement.PartyDps, Loc.T("pDPS")),
         (SummaryElement.Deaths, Loc.T("Deaths")),
@@ -811,8 +850,6 @@ public sealed class ConfigWindow : Window
         BarElement.Value => (Loc.T("Value"), Loc.T("21,234 DPS"), null),
         BarElement.Pace => (Loc.T("Pace vs your best pull"), Loc.T("Best +4%"),
                             Loc.T("Damage done so far compared with your best pull of the same encounter, at the same second.")),
-        BarElement.Percentile => (Loc.T("FFLogs percentile (estimate)"), "~92",
-                                  Loc.T("Your rDPS placed among FFLogs' rankings for your job on this fight. Needs FFLogs API credentials (FFLogs tab).")),
         BarElement.Uptime => (Loc.T("GCD uptime"), Loc.T("GCD 98.7%"),
                               Loc.T("Share of the time an enemy was targetable during which your GCD was rolling or you were casting. Deaths count as lost time. In an ultimate, uptime of the current phase.")),
         BarElement.PhaseDps => (Loc.T("Ultimate phase boss DPS"), Loc.T("Boss 145,000 (+3.6%)"),
@@ -1460,14 +1497,6 @@ public sealed class ConfigWindow : Window
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(Loc.T("Number of pulls saved (10 to 5000, 300 by default). Past it, the oldest pulls are removed when a new one is recorded."));
 
-        var window = c.GraphWindowSeconds;
-        ImGui.SetNextItemWidth(120);
-        if (ImGui.SliderInt(Loc.T("Rolling DPS window (s)"), ref window, 3, 60))
-        {
-            c.GraphWindowSeconds = window;
-            changed = true;
-        }
-
         Theme.SectionHeader(Loc.T("Failed mechanics"));
         changed |= Checkbox(Loc.T("Ignore tankbuster vulnerabilities on tanks"), c.MistakesIgnoreTankbusters,
                             v => c.MistakesIgnoreTankbusters = v);
@@ -1525,139 +1554,6 @@ public sealed class ConfigWindow : Window
         else
             c.UltimateEnrageSeconds.Remove(key);
         plugin.OnConfigChanged();
-    }
-
-    private void DrawFflogsTab()
-    {
-        var c = plugin.Configuration;
-        var percentiles = plugin.Percentiles;
-
-        Theme.SectionHeader(Loc.T("Percentile"));
-        if (Checkbox(Loc.T("Estimate the FFLogs percentile of your rDPS"), c.ShowPercentile, v => c.ShowPercentile = v))
-            plugin.OnConfigChanged();
-
-        Theme.Hint(Loc.T("Uses the FFLogs API v2. On fflogs.com, open your profile > API Clients (fflogs.com/api/clients), create a client (any name, redirect URL http://localhost) and paste its Client ID and Client Secret below. The old \"V1 Client Key\" does not work with this API."));
-        Theme.SectionHeader(Loc.T("API credentials"));
-
-        var credentialsChanged = false;
-        var clientId = c.FflogsClientId;
-        if (ImGui.InputText(Loc.T("Client ID"), ref clientId, 128))
-        {
-            c.FflogsClientId = clientId.Trim();
-            credentialsChanged = true;
-        }
-
-        var secret = c.FflogsClientSecret;
-        if (ImGui.InputText(Loc.T("Client Secret"), ref secret, 128, ImGuiInputTextFlags.Password))
-        {
-            c.FflogsClientSecret = secret.Trim();
-            credentialsChanged = true;
-        }
-
-        if (credentialsChanged)
-        {
-            percentiles.Reset();
-            plugin.OnConfigChanged();
-        }
-
-        using (ImRaii.Disabled(!percentiles.HasCredentials || percentiles.Testing))
-        {
-            if (Theme.GhostButton(percentiles.Testing ? Loc.T("Testing...") : Loc.T("Test connection")))
-                percentiles.TestConnection();
-        }
-
-        if (percentiles.TestResult is { } result)
-        {
-            ImGui.SameLine();
-            ImGui.TextColored(result.Ok ? Theme.Good : Theme.Bad, result.Ok ? result.Message : Loc.F("Failed: {0}",result.Message));
-        }
-
-        Theme.SectionHeader(Loc.T("Current fight"));
-        var territory = plugin.CurrentTerritory;
-        var boss = plugin.Boss.Current;
-        ImGui.TextDisabled(Loc.F("Current fight: {0}",percentiles.Describe(territory, boss?.NameId ?? 0)));
-        if (boss is null)
-            ImGui.TextDisabled(Loc.T("(the boss is detected during a fight)"));
-
-        var forced = c.FflogsEncounterOverrides.GetValueOrDefault(territory);
-        ImGui.SetNextItemWidth(120);
-        if (ImGui.InputInt(Loc.F("FFLogs encounter id for this zone ({0})",territory), ref forced, 0))
-        {
-            if (forced > 0)
-                c.FflogsEncounterOverrides[territory] = forced;
-            else
-                c.FflogsEncounterOverrides.Remove(territory);
-            plugin.OnConfigChanged();
-        }
-
-        Help(Loc.T("Only needed if the automatic match by boss name fails. The id is in the FFLogs URL of the fight (fflogs.com/zone/rankings/...?boss=ID). 0 = automatic."));
-
-        if (percentiles.LastError is { } err)
-            ImGui.TextColored(Theme.Bad, err);
-
-        Theme.SectionHeader(Loc.T("How it works"));
-        Theme.Hint(Loc.T("The estimate compares your rDPS to the best parse of each character for your job (current partition). During the fight it is only a trend: rDPS jumps around burst windows."));
-    }
-
-    private void DrawSourceTab()
-    {
-        var c = plugin.Configuration;
-
-        Theme.SectionHeader(Loc.T("Source"));
-        // The recommended source first.
-        CombatSourceKind[] kinds = [CombatSourceKind.Native, CombatSourceKind.Auto, CombatSourceKind.Act];
-        string[] labels = [Loc.T("Built-in only (recommended)"), Loc.T("Auto (ACT if available, else built-in)"), Loc.T("ACT only")];
-        var source = Array.IndexOf(kinds, c.Source);
-        ImGui.SetNextItemWidth(Theme.Px(300));
-        if (ImGui.Combo(Loc.T("Source"), ref source, labels, labels.Length))
-        {
-            c.Source = kinds[source];
-            plugin.OnConfigChanged();
-        }
-
-        Help(Loc.T("The built-in tracker reads the damage straight from the game: no ACT needed, and it is the one that computes rDPS and tells what killed you. ACT is only useful if you already run it."));
-
-        ImGui.TextDisabled(Loc.F("In use: {0}",plugin.Sources.Current.Name));
-        ImGui.Spacing();
-
-        if (ImGui.CollapsingHeader(Loc.T("ACT / OverlayPlugin"), ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            Theme.Hint(Loc.T("In ACT: Plugins > OverlayPlugin WSServer, then start the server. Default address is 127.0.0.1:10501."));
-
-            ImGui.InputText(Loc.T("Host"), ref hostInput, 128);
-            ImGui.InputInt(Loc.T("Port"), ref portInput);
-            portInput = Math.Clamp(portInput, 1, 65535);
-
-            var dirty = hostInput != c.Host || portInput != c.Port;
-            using (ImRaii.Disabled(!dirty))
-            {
-                if (ImGui.Button(Loc.T("Apply")))
-                {
-                    c.Host = hostInput.Trim();
-                    c.Port = portInput;
-                    plugin.OnConfigChanged(reconnect: true);
-                }
-            }
-
-            ImGui.SameLine();
-            if (ImGui.Button(Loc.T("Reconnect now")))
-                plugin.OnConfigChanged(reconnect: true);
-
-            ImGui.SameLine();
-            if (ImGui.Button(Loc.T("Reset")))
-            {
-                hostInput = "127.0.0.1";
-                portInput = 10501;
-            }
-
-            ImGui.TextDisabled(Loc.F("Status: {0}",plugin.Sources.Act.StatusText));
-        }
-
-        if (ImGui.CollapsingHeader(Loc.T("Built-in tracker"), ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            Theme.Hint(Loc.T("Reads the damage of your party directly from the game, without ACT. Pets are merged into their owner and the Limit Break is counted separately. DoTs whose owner cannot be determined are ignored, so values can be slightly lower than ACT's."));
-            ImGui.TextDisabled(Loc.F("Status: {0}",plugin.Sources.Native.StatusText));
-        }
     }
 
     private static void Help(string text) => Theme.HelpMarker(text);

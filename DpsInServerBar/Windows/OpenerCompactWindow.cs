@@ -18,6 +18,7 @@ public sealed class OpenerCompactWindow : Window
     private readonly OpenerWindow full;
     private IDisposable? themeScope;
     private IDisposable? styleScope;
+    private IDisposable? colorScope;
 
     public OpenerCompactWindow(Plugin plugin, OpenerWindow full)
         : base(Loc.T("Opener practice (compact)###DpsInServerBarOpenerCompact"),
@@ -44,10 +45,15 @@ public sealed class OpenerCompactWindow : Window
                           .Push(ImGuiStyleVar.WindowPadding, Theme.Px(new Vector2(8, 7)) * scale)
                           .Push(ImGuiStyleVar.FramePadding, ImGui.GetStyle().FramePadding * scale)
                           .Push(ImGuiStyleVar.ItemSpacing, ImGui.GetStyle().ItemSpacing * scale);
+        // The border fades with the background: no frame left around the icons once the background is gone.
+        var opacity = Math.Clamp(plugin.Configuration.OpenerOpacity, 0f, 1f);
+        colorScope = ImRaii.PushColor(ImGuiCol.Border, Theme.Alpha(Theme.Line, Theme.Line.W * opacity));
     }
 
     public override void PostDraw()
     {
+        colorScope?.Dispose();
+        colorScope = null;
         styleScope?.Dispose();
         styleScope = null;
         themeScope?.Dispose();
@@ -88,6 +94,24 @@ public sealed class OpenerCompactWindow : Window
             config.OpenerOpacity = percent / 100f;
         if (ImGui.IsItemDeactivatedAfterEdit())
             config.Save();
+
+        // Length of the countdown started by Start (the in-game /countdown or the one in the window).
+        var countdown = Math.Clamp(config.OpenerCountdown, 5, 16);
+        ImGui.SetNextItemWidth(Theme.Px(140));
+        if (ImGui.SliderInt("##countdown", ref countdown, 5, 16, Loc.T("Countdown %d s")))
+            config.OpenerCountdown = countdown;
+        if (ImGui.IsItemDeactivatedAfterEdit())
+            config.Save();
+
+        using (ImRaii.Disabled(!config.OpenerAutoClose))
+        {
+            var seconds = config.OpenerAutoCloseSeconds;
+            ImGui.SetNextItemWidth(Theme.Px(140));
+            if (ImGui.SliderInt(Loc.T("Auto close"), ref seconds, 10, 120, Loc.T("after %d s")))
+                config.OpenerAutoCloseSeconds = seconds;
+            if (ImGui.IsItemDeactivatedAfterEdit())
+                config.Save();
+        }
 
         ImGui.Separator();
         if (ImGui.MenuItem(Loc.T("Full view")))

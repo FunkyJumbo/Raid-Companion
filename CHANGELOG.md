@@ -3,6 +3,18 @@
 <!-- One "## <version>" section per release. The Release workflow publishes the section of the tagged
      version as the GitHub release notes; the same notes go into pluginmaster.json (shown in Dalamud). -->
 
+## 1.0.4.0
+
+- Removed: ACT support and the FFLogs percentile. The plugin now only uses its built-in tracker and makes no network connection. FFLogs credentials saved in the settings are deleted.
+- DPS and uptime graphs: fixed height, zoom with the mouse wheel (drag to move, double click to reset).
+- Positionals: every positional action is shown with how many landed (e.g. 2/2 in green, 2/3 in red after a miss).
+- GCD uptime: "Late" and "No GCD" are merged into "No GCD".
+- Party table and compact meter: new Crit DH column, the share of hits both critical and direct.
+- Live and History: each card can be hidden, and a GCD uptime card can be added (Settings > Display).
+- Opener practice: the countdown goes from 5 to 16 s.
+- Clipping: a table under the clipping timeline shows each clip with the GCD before, the oGCDs woven and the GCD that came late (new pulls).
+- Various UI changes and adjustments.
+
 ## 1.0.3.0
 
 - Progression: in an ultimate, phases are shown in alternating bands on the graph.

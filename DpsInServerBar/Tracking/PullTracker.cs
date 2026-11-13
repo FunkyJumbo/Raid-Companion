@@ -143,7 +143,6 @@ public sealed class PullTracker : IDisposable
             Job = you?.Job ?? string.Empty,
             YourDps = you?.EncDps ?? 0,
             YourRdps = you is { HasRdps: true } ? you.RDps : null,
-            Percentile = plugin.EstimatePercentile(final),
             Uptime = uptime?.Uptime,
             UptimeLostSeconds = uptime?.LostSeconds ?? 0,
             Gcd = uptime?.Gcd,
@@ -185,6 +184,7 @@ public sealed class PullTracker : IDisposable
                     DamagePercent = c.DamagePercent,
                     CritPercent = c.CritPercent,
                     DirectHitPercent = c.DirectHitPercent,
+                    CritDirectHitPercent = c.CritDirectHitPercent,
                     Deaths = c.Deaths,
                     IsYou = c.IsYou,
                 })
@@ -308,7 +308,6 @@ public sealed class PullTracker : IDisposable
             Job = job,
             YourDps = 21_234,
             YourRdps = 20_511,
-            Percentile = 87,
             Uptime = 0.987,
             PartyDps = 182_345,
             Rank = 2,
@@ -381,9 +380,6 @@ public sealed class PullTracker : IDisposable
                 AppendBest(sb, pull, rdps, p => p.YourRdps, isRate: false, preview ? 0.988 : null);
             });
         }
-
-        if (shown.HasFlag(SummaryElement.Percentile) && pull.Percentile is { } pct)
-            parts.Add(() => sb.PushColorRgba(Fflogs.FflogsNames.Color(pct)).Append(Loc.F("FFLogs ~{0:0}",pct)).PopColor());
 
         if (shown.HasFlag(SummaryElement.Uptime) && pull.Uptime is { } gcd)
         {

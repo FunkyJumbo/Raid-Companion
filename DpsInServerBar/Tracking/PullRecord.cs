@@ -32,8 +32,6 @@ public sealed class PullRecord
     /// <summary>Null when rDPS was not available for this pull.</summary>
     public double? YourRdps { get; set; }
 
-    /// <summary>Estimated FFLogs percentile of YourRdps, null when unknown.</summary>
-    public double? Percentile { get; set; }
     /// <summary>GCD uptime (0-1), null for pulls recorded before it existed.</summary>
     public double? Uptime { get; set; }
 
@@ -146,6 +144,9 @@ public sealed class PullCombatant
     public double DamagePercent { get; set; }
     public double CritPercent { get; set; }
     public double DirectHitPercent { get; set; }
+
+    /// <summary>Share of hits both critical and direct, null for pulls recorded before it was kept.</summary>
+    public double? CritDirectHitPercent { get; set; }
     public int Deaths { get; set; }
     public bool IsYou { get; set; }
 }

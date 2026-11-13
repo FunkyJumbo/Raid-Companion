@@ -1,14 +1,6 @@
 namespace DpsInServerBar.Combat;
 
-public enum CombatSourceKind
-{
-    /// <summary>ACT when it is reachable, the built-in tracker otherwise.</summary>
-    Auto,
-    Act,
-    Native,
-}
-
-/// <summary>Something that produces <see cref="CombatSnapshot"/>s: ACT over WebSocket, or the built-in tracker.</summary>
+/// <summary>Something that produces <see cref="CombatSnapshot"/>s (the built-in tracker).</summary>
 public interface ICombatSource
 {
     string Name { get; }

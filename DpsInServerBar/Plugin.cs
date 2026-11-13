@@ -4,10 +4,8 @@ using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
-using DpsInServerBar.Act;
 using DpsInServerBar.Combat;
 using DpsInServerBar.Display;
-using DpsInServerBar.Fflogs;
 using DpsInServerBar.Native;
 using DpsInServerBar.Opener;
 using DpsInServerBar.Tracking;
@@ -49,8 +47,6 @@ public sealed class Plugin : IDalamudPlugin
     private readonly OpenerCompactWindow openerCompactWindow;
     private readonly DtrController dtr;
 
-    // Read on the game thread, consumed by the WebSocket thread when matching the player's name.
-    private volatile string? playerName;
     private DateTime nextRefresh = DateTime.MinValue;
 
     public Plugin()
@@ -62,10 +58,9 @@ public sealed class Plugin : IDalamudPlugin
         UI.Names.Anonymize = Configuration.HideNames;
         Loc.Set(Configuration.Language, PluginInterface.UiLanguage);
 
-        var act = new ActClient(Log, () => playerName);
         var native = new NativeCombatTracker(GameInterop, ObjectTable, PartyList, Condition, ClientState, DataManager, PlayerState, Log);
         native.Mistakes.IgnoreTankbusters = Configuration.MistakesIgnoreTankbusters;
-        Sources = new CombatSourceManager(Configuration, act, native);
+        Sources = new CombatSourceManager(native);
         History = new PullHistory(PluginInterface.GetPluginConfigDirectory(), Log);
         Pulls = new PullTracker(this, DutyState, Condition, ChatGui);
         Boss = new BossTracker(ObjectTable, Condition, DataManager);
@@ -84,7 +79,6 @@ public sealed class Plugin : IDalamudPlugin
         native.LocalDamage += Positionals.OnHit;
         Dots = new DotTracker(ObjectTable, Condition, DataManager, () => Uptime.EnemyTargetable, () => Boss.Current?.EntityId ?? 0);
         native.TankSwaps.BossId = () => Boss.Current?.EntityId ?? 0;
-        Percentiles = new PercentileService(Configuration, DataManager, PluginInterface.GetPluginConfigDirectory(), Log);
         OpenerTracker = new OpenerTracker(GameInterop, ObjectTable, Log);
         dtr = new DtrController(this, DtrBar);
 
@@ -101,7 +95,7 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
-            HelpMessage = Loc.T("Open the main window. Subcommands: config, toggle, reconnect, history, compact, opener [compact|full], preset <number|name|next>."),
+            HelpMessage = Loc.T("Open the main window. Subcommands: config, toggle, history, compact, opener [compact|full], preset <number|name|next>."),
         });
         CommandManager.AddHandler(ShortCommand, new CommandInfo(OnCommand) { HelpMessage = Loc.F("Short for {0}.", CommandName) });
         CommandManager.AddHandler(LegacyCommand, new CommandInfo(OnCommand) { ShowInHelp = false });
@@ -113,7 +107,7 @@ public sealed class Plugin : IDalamudPlugin
         ClientState.TerritoryChanged += OnTerritoryChanged;
         Framework.Update += OnFrameworkUpdate;
 
-        Sources.Apply(reconnectAct: true);
+        Sources.Apply();
     }
 
     public Configuration Configuration { get; }
@@ -132,9 +126,7 @@ public sealed class Plugin : IDalamudPlugin
     public ComboTracker Combos { get; }
     public ContentCategories ContentCategories { get; }
     public FightCatalog Fights { get; }
-    public PercentileService Percentiles { get; }
     public OpenerTracker OpenerTracker { get; }
-    public ActClient Act => Sources.Act;
     public uint CurrentTerritory => ClientState.TerritoryType;
 
     /// <summary>Changes each time you enter a zone: the pulls of one entry into a duty share it.</summary>
@@ -156,19 +148,15 @@ public sealed class Plugin : IDalamudPlugin
         dtr.Dispose();
         Ultimates.PhaseEnded -= OnPhaseEnded;
         Pulls.Dispose();
-        Percentiles.Dispose();
         OpenerTracker.Dispose();
         Sources.Dispose();
     }
 
-    /// <summary>Estimated FFLogs percentile of your rDPS in this snapshot, if it can be computed.</summary>
-    public double? EstimatePercentile(CombatSnapshot? snapshot) =>
-        snapshot?.You is { HasJob: true, HasRdps: true } you
-            ? Percentiles.Estimate(CurrentTerritory, Boss.Current?.NameId ?? 0, you.Job, you.RDps)
-            : null;
-
     public void ToggleMainUi() => mainWindow.Toggle();
     public void ToggleConfigUi() => configWindow.Toggle();
+
+    /// <summary>Opens the settings of the compact meter.</summary>
+    public void OpenCompactSettings() => configWindow.OpenDisplay();
 
     public bool CompactOpen => compactWindow.IsOpen;
 
@@ -253,7 +241,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnTerritoryChanged(uint territory) => InstanceRun = Guid.NewGuid();
 
-    public void OnConfigChanged(bool reconnect = false)
+    public void OnConfigChanged()
     {
         Configuration.Save();
         UI.Theme.Configure(Configuration);
@@ -261,14 +249,6 @@ public sealed class Plugin : IDalamudPlugin
         Loc.Set(Configuration.Language, PluginInterface.UiLanguage);
         dtr.Invalidate();
         Sources.Native.Mistakes.IgnoreTankbusters = Configuration.MistakesIgnoreTankbusters;
-
-        if (reconnect && !Uri.TryCreate(Configuration.WebSocketUrl, UriKind.Absolute, out _))
-        {
-            ChatGui.PrintError(Loc.F("[Raid Companion] Invalid address: {0}",Configuration.WebSocketUrl));
-            return;
-        }
-
-        Sources.Apply(reconnect);
     }
 
     private void OnPhaseEnded(PhaseResult result)
@@ -292,8 +272,6 @@ public sealed class Plugin : IDalamudPlugin
         if (now < nextRefresh)
             return;
         nextRefresh = now.AddMilliseconds(250);
-
-        playerName = PlayerState.IsLoaded ? PlayerState.CharacterName : null;
 
         Boss.Update();
         Ultimates.Update();
@@ -360,9 +338,6 @@ public sealed class Plugin : IDalamudPlugin
                 break;
             case "toggle":
                 ToggleMetric();
-                break;
-            case "reconnect":
-                OnConfigChanged(reconnect: true);
                 break;
             case "history":
                 mainWindow.ShowHistory();

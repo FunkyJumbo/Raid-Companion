@@ -18,6 +18,13 @@ public sealed class DpsGraph
     // Below this the graph is unreadable: the window scrolls instead.
     public const float MinHeight = 150;
 
+    /// <summary>Height of the DPS and uptime graphs: always the same, so they stay readable.</summary>
+    public static float Height => Theme.Px(250);
+
+    // Graphs zoomed into (mouse wheel, drag) and graphs under the mouse last frame, by plot id.
+    private static readonly HashSet<string> Zoomed = [];
+    private static readonly HashSet<string> Hovered = [];
+
     // Window of the uptime curve, in seconds: short enough to see when uptime was lost.
     private const int UptimeWindow = 3;
 
@@ -34,7 +41,10 @@ public sealed class DpsGraph
             ShowUptime = kind == 1;
 
         if (ShowUptime)
+        {
+            ZoomHelp();
             return;
+        }
 
         ImGui.SameLine();
         var party = ShowParty ? 1 : 0;
@@ -51,6 +61,43 @@ public sealed class DpsGraph
         var average = ShowAverage;
         if (ImGui.Checkbox(Loc.T("Encounter average"), ref average))
             ShowAverage = average;
+
+        ZoomHelp();
+    }
+
+    private static void ZoomHelp()
+    {
+        ImGui.SameLine();
+        Theme.HelpMarker(Loc.T("Mouse wheel on the graph to zoom in on a moment, drag to move along the fight, double click to see the whole fight again."));
+    }
+
+    /// <summary>
+    /// The time axis: the whole fight, unless the graph was zoomed into (mouse wheel or drag while hovered); a double
+    /// click goes back to the whole fight. Never past the start or the end of the fight.
+    /// </summary>
+    private static void SetupTimeAxis(string id, double length)
+    {
+        length = Math.Max(length, 1);
+        if (Hovered.Contains(id))
+        {
+            if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                Zoomed.Remove(id);
+            else if (ImGui.GetIO().MouseWheel != 0 || ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+                Zoomed.Add(id);
+        }
+
+        if (!Zoomed.Contains(id))
+            ImPlot.SetupAxisLimits(ImAxis.X1, 0, length, ImPlotCond.Always);
+        ImPlot.SetupAxisLimitsConstraints(ImAxis.X1, 0, length);
+    }
+
+    /// <summary>Remembers whether the mouse is over the plot, for <see cref="SetupTimeAxis"/> next frame (call before EndPlot).</summary>
+    private static void TrackHover(string id)
+    {
+        if (ImPlot.IsPlotHovered())
+            Hovered.Add(id);
+        else
+            Hovered.Remove(id);
     }
 
     /// <summary>Adds the curves of one cumulative-damage timeline according to the current options.</summary>
@@ -79,11 +126,15 @@ public sealed class DpsGraph
         }
 
         using var style = PushStyle();
-        if (!ImPlot.BeginPlot(id, new Vector2(-1, Math.Max(height, MinHeight)), ImPlotFlags.NoMenus | ImPlotFlags.NoBoxSelect))
+        if (!ImPlot.BeginPlot(id, new Vector2(-1, height), ImPlotFlags.NoMenus | ImPlotFlags.NoBoxSelect))
             return;
 
-        ImPlot.SetupAxes(Loc.T("Time (s)"), Loc.T("Uptime %"), ImPlotAxisFlags.AutoFit, ImPlotAxisFlags.None);
-        ImPlot.SetupAxisLimits(ImAxis.Y1, 0, 105, ImPlotCond.Always);
+        // No vertical axis title: ImPlot draws it with glyphs the game font does not have. The ticks say "%".
+        ImPlot.SetupAxes(Loc.T("Time (s)"), string.Empty, ImPlotAxisFlags.None, ImPlotAxisFlags.NoLabel);
+        SetupTimeAxis(id, pulls.Max(p => p.Available.Length) - 1);
+        // A little below 0, so that a curve at 0 is not hidden by the frame.
+        ImPlot.SetupAxisLimits(ImAxis.Y1, -4, 105, ImPlotCond.Always);
+        ImPlot.SetupAxisFormat(ImAxis.Y1, "%g%%");
 
         var downtime = Timeline.Downtime(pulls[0].Available);
         ImPlot.SetNextFillStyle(Theme.Alpha(Theme.TextFaint, 0.35f));
@@ -103,6 +154,7 @@ public sealed class DpsGraph
 
         DrawDeaths(deaths);
 
+        TrackHover(id);
         ImPlot.EndPlot();
     }
 
@@ -115,14 +167,10 @@ public sealed class DpsGraph
     /// </summary>
     private static void DrawGaps(IReadOnlyList<GcdGap> gaps)
     {
-        foreach (var (kind, label, color) in new[]
-                 {
-                     (GcdGapKind.NoGcd, Loc.T("No GCD"), Theme.Bad),
-                     (GcdGapKind.Clipping, Loc.T("Clipping"), Theme.Warn),
-                     (GcdGapKind.Late, Loc.T("Late"), Theme.TextMuted),
-                 })
+        // Late presses are shown with the missed GCDs: one cause for players.
+        foreach (var (clipping, label, color) in new[] { (false, Loc.T("No GCD"), Theme.Bad), (true, Loc.T("Clipping"), Theme.Warn) })
         {
-            var ofKind = gaps.Where(g => g.Kind == kind).ToList();
+            var ofKind = gaps.Where(g => (g.Kind == GcdGapKind.Clipping) == clipping).ToList();
             if (ofKind.Count == 0)
                 continue;
 
@@ -315,7 +363,6 @@ public sealed class DpsGraph
     public static string GapLabel(GcdGapKind kind) => kind switch
     {
         GcdGapKind.Clipping => Loc.T("clipping"),
-        GcdGapKind.Late => Loc.T("late"),
         _ => Loc.T("no GCD"),
     };
 
@@ -338,19 +385,37 @@ public sealed class DpsGraph
     public static void Draw(
         string id, IReadOnlyList<Series> series, float height, double? threshold = null, IReadOnlyList<PartyDeath>? deaths = null)
     {
+        var longest = series.Select(s => s.Values.Length).DefaultIfEmpty(0).Max();
         using var style = PushStyle();
-        if (!ImPlot.BeginPlot(id, new Vector2(-1, Math.Max(height, MinHeight)), ImPlotFlags.NoMenus | ImPlotFlags.NoBoxSelect))
-            return;
+        // Some room under 0, so that a curve at 0 (before your first hit) is not hidden by the frame.
+        ImPlot.PushStyleVar(ImPlotStyleVar.FitPadding, new Vector2(0, 0.06f));
+        try
+        {
+            if (!ImPlot.BeginPlot(id, new Vector2(-1, height), ImPlotFlags.NoMenus | ImPlotFlags.NoBoxSelect))
+                return;
 
-        ImPlot.SetupAxes(Loc.T("Time (s)"), Loc.T("DPS"), ImPlotAxisFlags.AutoFit, ImPlotAxisFlags.AutoFit);
+            // No vertical axis title: ImPlot draws it with glyphs the game font does not have. The vertical axis fits
+            // the part of the fight shown, so it follows a zoom.
+            ImPlot.SetupAxes(Loc.T("Time (s)"), string.Empty, ImPlotAxisFlags.None,
+                             ImPlotAxisFlags.NoLabel | ImPlotAxisFlags.AutoFit | ImPlotAxisFlags.RangeFit);
+            SetupTimeAxis(id, longest - 1);
+            DrawSeries(series, longest, threshold, deaths);
+            TrackHover(id);
+            ImPlot.EndPlot();
+        }
+        finally
+        {
+            ImPlot.PopStyleVar();
+        }
+    }
 
-        var longest = 0;
+    private static void DrawSeries(IReadOnlyList<Series> series, int longest, double? threshold, IReadOnlyList<PartyDeath>? deaths)
+    {
         var index = 0;
         foreach (var s in series)
         {
             if (s.Values.Length == 0)
                 continue;
-            longest = System.Math.Max(longest, s.Values.Length);
             ImPlot.SetNextLineStyle(Theme.Series[index++ % Theme.Series.Length], 2f);
             ImPlot.PlotLine(s.Label, ref s.Values[0], s.Values.Length, 1, 0, ImPlotLineFlags.None, 0, sizeof(float));
         }
@@ -363,7 +428,5 @@ public sealed class DpsGraph
         }
 
         DrawDeaths(deaths);
-
-        ImPlot.EndPlot();
     }
 }

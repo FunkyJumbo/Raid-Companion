@@ -89,6 +89,14 @@ public sealed unsafe class UptimeTracker
     private double gapLocked;
     private double gapFree;
 
+    // The GCD rolling now and the one before it (action and start), to tell which GCD a clip delayed. gcdStartedNow:
+    // a new GCD started this frame (the gap closing now ended with it).
+    private uint lastGcdId;
+    private DateTime lastGcdStartUtc;
+    private uint previousGcdId;
+    private DateTime previousGcdStartUtc;
+    private bool gcdStartedNow;
+
     // Your last actions (from the action effect hook), to tell which oGCD caused a clip.
     private readonly List<(uint ActionId, DateTime TimeUtc)> recentActions = [];
 
@@ -220,6 +228,9 @@ public sealed unsafe class UptimeTracker
         gcdWasActive = false;
         lastElapsed = 0;
         inGap = false;
+        lastGcdId = previousGcdId = 0;
+        lastGcdStartUtc = previousGcdStartUtc = now;
+        gcdStartedNow = false;
         revision++;
     }
 
@@ -233,11 +244,15 @@ public sealed unsafe class UptimeTracker
         if (gcd == null)
             return false;
 
+        gcdStartedNow = false;
         var isActive = gcd->IsActive;
         if (isActive && (!gcdWasActive || gcd->Elapsed < lastElapsed - 0.01f))
         {
             gcdCount++;
             recastSum += gcd->Total;
+            (previousGcdId, previousGcdStartUtc) = (lastGcdId, lastGcdStartUtc);
+            (lastGcdId, lastGcdStartUtc) = (gcd->ActionId, DateTime.UtcNow);
+            gcdStartedNow = true;
         }
 
         gcdWasActive = isActive;
@@ -285,7 +300,14 @@ public sealed unsafe class UptimeTracker
                 action = recentActions.LastOrDefault(a => a.TimeUtc >= from).ActionId;
             }
 
-            gaps.Add(new GcdGap(gapStart, seconds, kind, gapLocked, action));
+            // The GCDs on each side of the gap: the one that just started if the gap ends with it, and the one before.
+            var (prev, prevStart, next) = gcdStartedNow
+                                              ? (previousGcdId, previousGcdStartUtc, lastGcdId)
+                                              : (lastGcdId, lastGcdStartUtc, 0u);
+            var weaves = recentActions.Where(a => a.TimeUtc >= prevStart && a.ActionId != prev && a.ActionId != next)
+                                      .Select(a => a.ActionId).ToArray();
+            var between = next != 0 && prev != 0 ? (lastGcdStartUtc - previousGcdStartUtc).TotalSeconds : 0;
+            gaps.Add(new GcdGap(gapStart, seconds, kind, gapLocked, action, prev, next, weaves.Length > 0 ? weaves : null, between));
         }
         revision++;
     }

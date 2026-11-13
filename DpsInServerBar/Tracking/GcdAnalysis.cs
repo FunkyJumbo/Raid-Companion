@@ -16,7 +16,13 @@ public enum GcdGapKind
 }
 
 /// <summary>One stretch where the GCD was ready and unused. <see cref="AtSeconds"/> counts from the pull start.</summary>
-public sealed record GcdGap(double AtSeconds, double Seconds, GcdGapKind Kind, double LockedSeconds = 0, uint ActionId = 0)
+/// <param name="PrevGcdId">The GCD used before the gap (0 when unknown, e.g. pulls recorded before it was kept).</param>
+/// <param name="NextGcdId">The GCD that came late, at the end of the gap (0 when the gap ended otherwise).</param>
+/// <param name="Weaves">The oGCDs used between the two GCDs.</param>
+/// <param name="BetweenSeconds">Time from the start of the GCD before to the start of the one after (0 when unknown).</param>
+public sealed record GcdGap(
+    double AtSeconds, double Seconds, GcdGapKind Kind, double LockedSeconds = 0, uint ActionId = 0,
+    uint PrevGcdId = 0, uint NextGcdId = 0, uint[]? Weaves = null, double BetweenSeconds = 0)
 {
     /// <summary>Counted as a clip: held at least 0.1 s by an animation lock (<see cref="ActionId"/>: the oGCD used then, 0 if unknown).</summary>
     [System.Text.Json.Serialization.JsonIgnore]

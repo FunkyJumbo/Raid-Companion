@@ -82,6 +82,7 @@ public enum BarElement
     Phase,
     PhaseDps,
     Uptime,
+    /// <summary>Removed (FFLogs percentile).</summary>
     Percentile,
 
     /// <summary>Time since the pull.</summary>
@@ -99,6 +100,8 @@ public enum SummaryElement
     Job = 1,
     Dps = 2,
     Rdps = 4,
+
+    /// <summary>Removed (FFLogs percentile).</summary>
     Percentile = 8,
     Uptime = 16,
     PartyDps = 32,
@@ -109,7 +112,7 @@ public enum SummaryElement
 
     /// <summary>Mechanics you failed (penalty debuffs), and the party's count.</summary>
     Mistakes = 256,
-    All = Job | Dps | Rdps | Percentile | Uptime | PartyDps | Deaths | KilledBy | Mistakes,
+    All = Job | Dps | Rdps | Uptime | PartyDps | Deaths | KilledBy | Mistakes,
 }
 
 /// <summary>Optional columns of the compact meter.</summary>
@@ -121,6 +124,31 @@ public enum CompactColumn
     Crit = 2,
     DirectHit = 4,
     Deaths = 8,
+
+    /// <summary>Share of hits both critical and direct.</summary>
+    CritDirectHit = 16,
+}
+
+/// <summary>Figure cards at the top of Live and of a pull in History.</summary>
+[Flags]
+public enum MainCard
+{
+    None = 0,
+    Dps = 1,
+    Rdps = 2,
+    PartyDps = 4,
+
+    /// <summary>Boss HP: left in Live (with the projected kill), when the pull ended in History.</summary>
+    BossHp = 8,
+
+    /// <summary>Live only: damage so far against your best pull.</summary>
+    Pace = 16,
+
+    /// <summary>History only.</summary>
+    Duration = 32,
+
+    /// <summary>Your GCD uptime (off by default).</summary>
+    Gcd = 64,
 }
 
 [Serializable]
@@ -186,16 +214,11 @@ public sealed class BarPreset
 [Serializable]
 public sealed class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 10;
+    public int Version { get; set; } = 11;
 
     /// <summary>Order and visibility of the elements of the server bar text.</summary>
     [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
     public List<BarElementSetting> BarLayout { get; set; } = DefaultLayout();
-
-    // Data source
-    public CombatSourceKind Source { get; set; } = CombatSourceKind.Native;
-    public string Host { get; set; } = "127.0.0.1";
-    public int Port { get; set; } = 10501;
 
     // Display
     public DisplayMetric Metric { get; set; } = DisplayMetric.Personal;
@@ -244,8 +267,14 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>Language of the plugin: auto (Dalamud's), en, fr or de.</summary>
     public string Language { get; set; } = "auto";
 
-    /// <summary>Opener practice: countdown before the pull when pressing Start, in seconds.</summary>
-    public int OpenerCountdown { get; set; } = 5;
+    /// <summary>Opener practice: countdown before the pull when pressing Start, in seconds (5 to 16).</summary>
+    public int OpenerCountdown
+    {
+        get => openerCountdown;
+        set => openerCountdown = Math.Clamp(value, 5, 16);
+    }
+
+    private int openerCountdown = 5;
 
     /// <summary>Opener practice: Start launches the in-game /countdown (out of combat), so the pull is the game's.</summary>
     public bool OpenerGameCountdown { get; set; } = true;
@@ -276,6 +305,9 @@ public sealed class Configuration : IPluginConfiguration
 
     /// <summary>Columns of the compact meter shown after the player and the DPS / rDPS.</summary>
     public CompactColumn CompactColumns { get; set; } = CompactColumn.Share | CompactColumn.Deaths;
+
+    /// <summary>Figure cards shown at the top of Live and of a pull in History.</summary>
+    public MainCard MainCards { get; set; } = MainCard.Dps | MainCard.Rdps | MainCard.PartyDps | MainCard.BossHp | MainCard.Pace | MainCard.Duration;
 
     /// <summary>Opacity of the compact meter's background, 0 (see-through) to 1.</summary>
     public float CompactOpacity { get; set; } = 1f;
@@ -393,23 +425,12 @@ public sealed class Configuration : IPluginConfiguration
             ? manual
             : Math.Max(liveHp, UltimatePhaseHpDetected.GetValueOrDefault(phaseKey));
 
-    // FFLogs percentile estimate (API v2 client credentials, entered by the user in the settings)
-    public bool ShowPercentile { get; set; } = true;
-    public string FflogsClientId { get; set; } = string.Empty;
-    public string FflogsClientSecret { get; set; } = string.Empty;
-
-    /// <summary>Territory id to FFLogs encounter id, when the automatic match by boss name fails.</summary>
-    [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
-    public Dictionary<uint, int> FflogsEncounterOverrides { get; set; } = new();
-
     // Pre-v3 display toggles, only read once to build BarLayout.
     public bool? ShowJob { get; set; }
     public bool? ShowJobIcon { get; set; }
     public bool? ShowRank { get; set; }
     public bool? ShowFinalMarker { get; set; }
     public bool? ShowPaceVsBest { get; set; }
-
-    public string WebSocketUrl => $"ws://{Host}:{Port}/ws";
 
     public bool IsShown(BarElement element) => BarLayout.Any(e => e.Element == element && e.Enabled);
 
@@ -512,6 +533,17 @@ public sealed class Configuration : IPluginConfiguration
             changed = true;
         }
 
+        if (Version < 11)
+        {
+            // The FFLogs percentile was removed (bar, presets and chat summary).
+            BarLayout.RemoveAll(e => RemovedElements.Contains(e.Element));
+            foreach (var preset in BarPresets)
+                preset.Layout.RemoveAll(e => RemovedElements.Contains(e.Element));
+            ChatSummaryElements &= ~SummaryElement.Percentile;
+            Version = 11;
+            changed = true;
+        }
+
         // Elements added in later versions show up, hidden, at the end.
         foreach (var element in Enum.GetValues<BarElement>().Except(RemovedElements))
         {
@@ -527,7 +559,7 @@ public sealed class Configuration : IPluginConfiguration
 
     /// <summary>Bar elements that no longer exist.</summary>
     public static readonly BarElement[] RemovedElements =
-        [BarElement.FinalMarker, BarElement.KillTime, BarElement.JobIcon, BarElement.JobName, BarElement.BossHp];
+        [BarElement.FinalMarker, BarElement.KillTime, BarElement.JobIcon, BarElement.JobName, BarElement.BossHp, BarElement.Percentile];
 
     private void SetShown(BarElement element, bool shown)
     {
@@ -545,7 +577,6 @@ public sealed class Configuration : IPluginConfiguration
         new() { Element = BarElement.Phase, Enabled = false },
         new() { Element = BarElement.PhaseDps, Enabled = false },
         new() { Element = BarElement.Uptime, Enabled = false },
-        new() { Element = BarElement.Percentile, Enabled = false },
     ];
 
     /// <summary>

@@ -50,7 +50,6 @@ public sealed class MainWindow : Window
     // Height the window needs to show everything, from the last frame (pixels); null when a part grows with the
     // window (a graph): the window then has no height limit.
     private float? fitHeight;
-    private bool liveElastic;
     private IDisposable? themeScope;
 
     public MainWindow(Plugin plugin) : base(Loc.T("Raid Companion###DpsInServerBarMain"))
@@ -297,10 +296,8 @@ public sealed class MainWindow : Window
         graphTop = null;
         if (selectedTab == 0)
         {
-            liveElastic = false;
             DrawLive();
-            if (!liveElastic)
-                fitHeight = ImGui.GetCursorPosY() - ImGui.GetStyle().ItemSpacing.Y + ImGui.GetStyle().WindowPadding.Y;
+            fitHeight = ImGui.GetCursorPosY() - ImGui.GetStyle().ItemSpacing.Y + ImGui.GetStyle().WindowPadding.Y;
         }
         else
         {
@@ -335,7 +332,7 @@ public sealed class MainWindow : Window
     private void DrawSourceAndSettings()
     {
         var source = plugin.Sources.Current;
-        var status = $"{source.Name}: {source.StatusText}{(plugin.Configuration.Source == CombatSourceKind.Auto ? Loc.T(" (auto)") : "")}";
+        var status = $"{source.Name}: {source.StatusText}";
         var badgeWidth = ImGui.CalcTextSize(status).X + Theme.Px(14);
         var buttonWidth = ImGui.GetFrameHeight();
         var spacing = ImGui.GetStyle().ItemSpacing.X;
@@ -395,7 +392,7 @@ public sealed class MainWindow : Window
             snapshot.Combatants.Select(c => new PullCombatant
             {
                 Name = c.Name, Job = c.Job, Dps = c.EncDps, Rdps = c.HasRdps ? c.RDps : null, Breakdown = c.RdpsBreakdown, DamagePercent = c.DamagePercent,
-                CritPercent = c.CritPercent, DirectHitPercent = c.DirectHitPercent, Deaths = c.Deaths, IsYou = c.IsYou,
+                CritPercent = c.CritPercent, DirectHitPercent = c.DirectHitPercent, CritDirectHitPercent = c.CritDirectHitPercent, Deaths = c.Deaths, IsYou = c.IsYou,
             }));
 
         var liveDeaths = plugin.Sources.Native.PartyDeaths.Since(snapshot.StartUtc);
@@ -445,36 +442,25 @@ public sealed class MainWindow : Window
         {
             var rank = snapshot.YourRank();
             var party = snapshot.Combatants.Count(c => c.HasJob);
-            cards.Add(new Card(Loc.T("DPS"), NumberFormat.Format(you.EncDps, NumberStyle.Grouped), Theme.Gold,
+            if (Shown(MainCard.Dps))
+                cards.Add(new Card(Loc.T("DPS"), NumberFormat.Format(you.EncDps, NumberStyle.Grouped), Theme.Gold,
                                           party > 1 && rank > 0 ? Loc.F("#{0} of {1}",rank,party) : null));
-            if (you.HasRdps)
+            if (you.HasRdps && Shown(MainCard.Rdps))
                 cards.Add(new Card(Loc.T("rDPS"), NumberFormat.Format(you.RDps, NumberStyle.Grouped), Theme.Crystal,
                                               party > 1 ? Loc.F("#{0} of {1}",snapshot.YourRank(byRdps: true),party) : null));
         }
+
+        if (Shown(MainCard.Gcd) && plugin.Uptime.Snapshot() is { AvailableSeconds: >= 5 } up)
+            cards.Add(new Card(Loc.T("GCD uptime"), $"{up.Uptime:0.0%}", Theme.Crystal, Loc.F("{0:0.0}s lost",up.LostSeconds)));
 
         var elapsed = snapshot.Encounter.Duration.TotalSeconds;
         var boss = plugin.Ultimates.Current is null ? plugin.Boss.Current : null;
         var enrage = threshold?.EnrageSeconds ?? 0;
 
-        if (enrage > 0 && PartyGapToEnrage(snapshot, boss, partyDps, elapsed, threshold!) is { } gap)
-        {
-            var color = gap >= 0 ? Theme.Good : Theme.Bad;
-            cards.Add(new Card(Loc.T("Party DPS"), NumberFormat.Format(partyDps, NumberStyle.Grouped), color,
-                               Loc.F("{0:+0.0%;-0.0%} vs enrage",gap), color));
-        }
-        else if (threshold is { EffectiveMinPartyDps: > 0 } check)
-        {
-            var color = partyDps >= check.EffectiveMinPartyDps ? Theme.Good : Theme.Bad;
-            cards.Add(new Card(Loc.T("Party DPS"), NumberFormat.Format(partyDps, NumberStyle.Grouped), color,
-                               Loc.F("need {0} ",NumberFormat.Format(check.EffectiveMinPartyDps, NumberStyle.Grouped))
-                               + $"({partyDps / check.EffectiveMinPartyDps - 1:+0.0%;-0.0%})", color));
-        }
-        else
-        {
-            cards.Add(new Card(Loc.T("Party DPS"), NumberFormat.Format(partyDps, NumberStyle.Grouped), Theme.Gold));
-        }
+        if (Shown(MainCard.PartyDps))
+            cards.Add(PartyDpsCard(snapshot, boss, partyDps, elapsed, enrage, threshold));
 
-        if (boss is not null)
+        if (boss is not null && Shown(MainCard.BossHp))
         {
             string? hint = null;
             Vector4? hintColor = null;
@@ -497,13 +483,38 @@ public sealed class MainWindow : Window
             cards.Add(new Card(boss.Name, $"{boss.HpFraction:0.0%}", Theme.Bad, hint, hintColor));
         }
 
-        if (plugin.Pulls.PaceVsBest() is { } pace)
+        if (Shown(MainCard.Pace) && plugin.Pulls.PaceVsBest() is { } pace)
         {
             var color = pace >= 0 ? Theme.Good : Theme.Bad;
             cards.Add(new Card(Loc.T("Pace vs best"), $"{pace:+0.0%;-0.0%}", color, Loc.T("damage so far"), ValueColor: color));
         }
 
         DrawCards(cards, uniform: true);
+    }
+
+    /// <summary>True when this figure card is ticked in the settings (Display > Main window cards).</summary>
+    private bool Shown(MainCard card) => plugin.Configuration.MainCards.HasFlag(card);
+
+    /// <summary>Party DPS card: against the enrage when known, else against the fight's minimum DPS, else the value alone.</summary>
+    private static Card PartyDpsCard(
+        CombatSnapshot snapshot, BossInfo? boss, double partyDps, double elapsed, double enrage, PartyDpsThreshold? threshold)
+    {
+        var value = NumberFormat.Format(partyDps, NumberStyle.Grouped);
+        if (enrage > 0 && PartyGapToEnrage(snapshot, boss, partyDps, elapsed, threshold!) is { } gap)
+        {
+            var color = gap >= 0 ? Theme.Good : Theme.Bad;
+            return new Card(Loc.T("Party DPS"), value, color, Loc.F("{0:+0.0%;-0.0%} vs enrage",gap), color);
+        }
+
+        if (threshold is { EffectiveMinPartyDps: > 0 } check)
+        {
+            var color = partyDps >= check.EffectiveMinPartyDps ? Theme.Good : Theme.Bad;
+            return new Card(Loc.T("Party DPS"), value, color,
+                            Loc.F("need {0} ",NumberFormat.Format(check.EffectiveMinPartyDps, NumberStyle.Grouped))
+                            + $"({partyDps / check.EffectiveMinPartyDps - 1:+0.0%;-0.0%})", color);
+        }
+
+        return new Card(Loc.T("Party DPS"), value, Theme.Gold);
     }
 
     /// <summary>
@@ -568,6 +579,9 @@ public sealed class MainWindow : Window
     /// </summary>
     private static void DrawCards(List<Card> cards, bool uniform = false)
     {
+        if (cards.Count == 0)
+            return; // every card turned off in the settings
+
         var width = Math.Min(Theme.Px(CardWidth), Theme.CardWidth(cards.Count));
         if (uniform)
             width = cards.Select(c => Theme.StatCardWidth(c.Caption, c.Value, c.Hint)).Append(width).Max();
@@ -648,9 +662,7 @@ public sealed class MainWindow : Window
             // Uptime of the fight in progress (or the last one).
             if (plugin.Uptime.Snapshot() is { } up)
             {
-                liveElastic = true;
-                graphTop = ImGui.GetCursorPosY();
-                DpsGraph.DrawUptime("##liveuptime", [(Loc.T("You"), up.AvailableBySecond, up.ActiveBySecond)], ImGui.GetContentRegionAvail().Y, up.Gcd.Gaps,
+                DpsGraph.DrawUptime("##liveuptime", [(Loc.T("You"), up.AvailableBySecond, up.ActiveBySecond)], DpsGraph.Height, up.Gcd.Gaps,
                                     plugin.Sources.Latest is { } latest ? plugin.Sources.Native.PartyDeaths.Since(latest.StartUtc) : null);
             }
             else
@@ -675,9 +687,8 @@ public sealed class MainWindow : Window
         if (best is not null && !graph.ShowParty)
             series.Add(new DpsGraph.Series(Loc.T("Best pull average"), Timeline.Average(best.YourDamageTimeline)));
 
-        liveElastic = true;
-        graphTop = ImGui.GetCursorPosY();
-        DpsGraph.Draw("##livegraph", series, ImGui.GetContentRegionAvail().Y,
+        // One id per pull: a zoom does not carry over to the next pull.
+        DpsGraph.Draw($"##livegraph{pull.StartUtc.Ticks}", series, DpsGraph.Height,
                       graph.ShowParty ? threshold?.EffectiveMinPartyDps : null, plugin.Sources.Native.PartyDeaths.Since(pull.StartUtc));
     }
 
@@ -1451,8 +1462,8 @@ public sealed class MainWindow : Window
             var uptimes = new List<(string, float[], float[])> { (Loc.T("This pull"), pull.UptimeAvailableBySecond, pull.UptimeActiveBySecond) };
             if (compare is { UptimeAvailableBySecond.Length: > 0 })
                 uptimes.Add((Loc.T("Compared"), compare.UptimeAvailableBySecond, compare.UptimeActiveBySecond));
-            detailsHeight = ImGui.GetCursorPosY() - top + DpsGraph.MinHeight;
-            DpsGraph.DrawUptime("##historyuptime", uptimes, ImGui.GetContentRegionAvail().Y, pull.Gcd?.Gaps, pull.PartyDeaths);
+            DpsGraph.DrawUptime($"##historyuptime{pull.Id}", uptimes, DpsGraph.Height, pull.Gcd?.Gaps, pull.PartyDeaths);
+            detailsHeight = ImGui.GetCursorPosY() - top;
             return;
         }
 
@@ -1465,8 +1476,8 @@ public sealed class MainWindow : Window
         }
 
         var threshold = graph.ShowParty ? config.FindThreshold(pull.TerritoryId, pull.Title)?.EffectiveMinPartyDps : null;
-        detailsHeight = ImGui.GetCursorPosY() - top + DpsGraph.MinHeight;
-        DpsGraph.Draw("##historygraph", series, ImGui.GetContentRegionAvail().Y, threshold, pull.PartyDeaths);
+        DpsGraph.Draw($"##historygraph{pull.Id}", series, DpsGraph.Height, threshold, pull.PartyDeaths);
+        detailsHeight = ImGui.GetCursorPosY() - top;
     }
 
     /// <summary>The pull's figures, with the gap to the compared pull under each.</summary>
@@ -1486,9 +1497,10 @@ public sealed class MainWindow : Window
         var (dpsHint, dpsColor) = Gap(pull.YourDps, compare?.YourDps);
         if (dpsHint is null && pull.PartySize > 1 && pull.Rank > 0)
             dpsHint = Loc.F("#{0} of {1}",pull.Rank,pull.PartySize);
-        cards.Add(new Card(Loc.T("DPS"), NumberFormat.Format(pull.YourDps, NumberStyle.Grouped), Theme.Gold, dpsHint, dpsColor));
+        if (Shown(MainCard.Dps))
+            cards.Add(new Card(Loc.T("DPS"), NumberFormat.Format(pull.YourDps, NumberStyle.Grouped), Theme.Gold, dpsHint, dpsColor));
 
-        if (pull.YourRdps is { } rdps)
+        if (pull.YourRdps is { } rdps && Shown(MainCard.Rdps))
         {
             var (hint, color) = Gap(rdps, compare?.YourRdps);
             if (hint is null && pull.PartySize > 1 && pull.RdpsRank > 0)
@@ -1496,8 +1508,15 @@ public sealed class MainWindow : Window
             cards.Add(new Card(Loc.T("rDPS"), NumberFormat.Format(rdps, NumberStyle.Grouped), Theme.Crystal, hint, color));
         }
 
+        if (pull.Uptime is { } uptime && Shown(MainCard.Gcd))
+        {
+            var (hint, color) = Gap(uptime, compare?.Uptime, rate: true);
+            cards.Add(new Card(Loc.T("GCD uptime"), $"{uptime:0.0%}", Theme.Crystal, hint ?? Loc.F("{0:0.0}s lost",pull.UptimeLostSeconds), color));
+        }
+
         var (partyHint, partyColor) = Gap(pull.PartyDps, compare?.PartyDps);
-        cards.Add(new Card(Loc.T("Party DPS"), NumberFormat.Format(pull.PartyDps, NumberStyle.Grouped), Theme.Gold, partyHint, partyColor));
+        if (Shown(MainCard.PartyDps))
+            cards.Add(new Card(Loc.T("Party DPS"), NumberFormat.Format(pull.PartyDps, NumberStyle.Grouped), Theme.Gold, partyHint, partyColor));
 
         // In an ultimate, the time in the phase reached, the whole pull below.
         var durationHint = compare is not null ? Loc.F("vs {0}",NumberFormat.Duration(TimeSpan.FromSeconds(compare.PhaseSeconds ?? compare.DurationSeconds)))
@@ -1506,12 +1525,13 @@ public sealed class MainWindow : Window
         var durationCaption = pull.PhaseSeconds is not null
                                   ? Loc.F("{0} duration", UltimateDefinitions.Label(pull.TerritoryId, Progression.Phase(pull)))
                                   : Loc.T("Duration");
-        cards.Add(new Card(durationCaption, NumberFormat.Duration(TimeSpan.FromSeconds(pull.PhaseSeconds ?? pull.DurationSeconds)),
+        if (Shown(MainCard.Duration))
+            cards.Add(new Card(durationCaption, NumberFormat.Duration(TimeSpan.FromSeconds(pull.PhaseSeconds ?? pull.DurationSeconds)),
                                       pull.Outcome switch { PullOutcome.Kill => Theme.Good, PullOutcome.Wipe => Theme.Bad, _ => Theme.TextMuted },
                                       durationHint));
 
         // Boss HP left when the pull ended (of the phase reached, in an ultimate), or Kill.
-        if (pull.Outcome == PullOutcome.Kill || pull.BossHpLeft is not null)
+        if ((pull.Outcome == PullOutcome.Kill || pull.BossHpLeft is not null) && Shown(MainCard.BossHp))
         {
             var ultimate = Progression.IsUltimate(pull.TerritoryId);
             var value = pull.Outcome == PullOutcome.Kill ? Loc.T("Kill") : Loc.F("{0:0.0%} left", pull.BossHpLeft!.Value);
@@ -1764,12 +1784,15 @@ public sealed class MainWindow : Window
         var share = (double)hits / uses.Count;
         var open = Fold(Loc.T("Positionals"), "ppos");
         ImGui.TextColored(share >= 1 ? Theme.Good : Theme.Bad, $"{hits}/{uses.Count} ({share:0%})");
-        foreach (var action in uses.GroupBy(u => u.ActionId).Where(g => g.Any(u => !u.Hit)).OrderByDescending(g => g.Count(u => !u.Hit)))
+        foreach (var action in uses.GroupBy(u => u.ActionId))
         {
+            var landed = action.Count(u => u.Hit);
             ImGui.SameLine(0, Theme.Px(10));
-            ActionIcons.Draw(ActionIcons.OfAction(action.Key), ImGui.GetTextLineHeight());
+            var hovered = ActionIcons.Draw(ActionIcons.OfAction(action.Key), ImGui.GetTextLineHeight());
             ImGui.SameLine(0, Theme.Px(4));
-            ImGui.TextColored(Theme.Bad, $"{action.Count(u => !u.Hit)}/{action.Count()}");
+            ImGui.TextColored(landed == action.Count() ? Theme.Good : Theme.Bad, $"{landed}/{action.Count()}");
+            if (hovered || ImGui.IsItemHovered())
+                ImGui.SetTooltip(PositionalTooltip(action.ToList()));
         }
 
         if (!open)
@@ -2135,22 +2158,35 @@ public sealed class MainWindow : Window
         ImGui.TextColored(share >= 1 ? Theme.Good : Theme.Bad, $"{hits}/{uses.Count} ({share:0%})");
 
         var iconSize = ImGui.GetTextLineHeight();
-        foreach (var action in uses.GroupBy(u => u.ActionId).Where(g => g.Any(u => !u.Hit)).OrderByDescending(g => g.Count(u => !u.Hit)))
+        // Every positional action, with how many of its uses landed: green while none missed, red after the first miss.
+        foreach (var action in uses.GroupBy(u => u.ActionId))
         {
-            var missed = action.Where(u => !u.Hit).ToList();
+            var list = action.ToList();
+            var landed = list.Count(u => u.Hit);
             ImGui.SameLine(0, Theme.Px(10));
             var hovered = ActionIcons.Draw(ActionIcons.OfAction(action.Key), iconSize);
             ImGui.SameLine(0, Theme.Px(4));
-            ImGui.TextColored(Theme.Bad, names ? Loc.F("{0} {1}/{2} missed",GameNames.Action(missed[0].ActionId, missed[0].Action),missed.Count,action.Count()) : $"{missed.Count}/{action.Count()}");
+            var count = $"{landed}/{list.Count}";
+            ImGui.TextColored(landed == list.Count ? Theme.Good : Theme.Bad,
+                              names ? $"{GameNames.Action(list[0].ActionId, list[0].Action)} {count}" : count);
             if (hovered || ImGui.IsItemHovered())
-            {
-                ImGui.SetTooltip(Loc.F("{0} ({1}): {2} of {3} missed, at ",GameNames.Action(missed[0].ActionId, missed[0].Action),(missed[0].Rear ? Loc.T("rear") : Loc.T("flank")),missed.Count,action.Count())
-                                 + string.Join(", ", missed.Select(u => NumberFormat.Duration(TimeSpan.FromSeconds(u.AtSeconds)))));
-            }
+                ImGui.SetTooltip(PositionalTooltip(list));
         }
 
         Theme.HelpMarker(
             Loc.T("Your positional actions whose positional bonus landed, read from the bonus the game gave each hit (True North and bosses without positionals count as hits).\nHover an action for when you missed it."));
+    }
+
+    /// <summary>An action's positionals: how many landed, and when the others were missed.</summary>
+    private static string PositionalTooltip(IReadOnlyList<PositionalUse> uses)
+    {
+        var name = GameNames.Action(uses[0].ActionId, uses[0].Action);
+        var side = uses[0].Rear ? Loc.T("rear") : Loc.T("flank");
+        var missed = uses.Where(u => !u.Hit).ToList();
+        var text = Loc.F("{0} ({1}): {2} of {3} landed", name, side, uses.Count - missed.Count, uses.Count);
+        if (missed.Count > 0)
+            text += Loc.F("\nMissed at {0}", string.Join(", ", missed.Select(u => NumberFormat.Duration(TimeSpan.FromSeconds(u.AtSeconds)))));
+        return text;
     }
 
     /// <summary>One line with your combo errors, by icon of the action used (with its name in the history); hover for details.</summary>
@@ -2210,8 +2246,97 @@ public sealed class MainWindow : Window
         }).ToList();
         DrawIconStrip("clipping", marks, [], pullSeconds);
         Theme.Hint(Loc.T("Each icon is the oGCD that landed when your GCD was held by an animation lock."));
+        DrawClipTable(clips);
         if (folded)
             ImGui.TreePop();
+    }
+
+    /// <summary>
+    /// The clips one per row: when, how long the GCD waited, the GCD before, the oGCDs woven after it and the GCD that came
+    /// late, and the time between the two GCDs. Scrolls past a few rows.
+    /// </summary>
+    private static void DrawClipTable(IReadOnlyList<GcdGap> clips)
+    {
+        var icon = ImGui.GetTextLineHeight() * 1.5f;
+        var rowHeight = icon + ImGui.GetStyle().CellPadding.Y * 2;
+        const int visibleRows = 8;
+        var height = clips.Count > visibleRows
+                         ? ImGui.GetTextLineHeightWithSpacing() + visibleRows * rowHeight
+                         : 0;
+        var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingStretchProp
+                    | (clips.Count > visibleRows ? ImGuiTableFlags.ScrollY : ImGuiTableFlags.None);
+        using var table = ImRaii.Table("##cliptable", 4, flags, new Vector2(-1, height));
+        if (!table)
+            return;
+
+        ImGui.TableSetupScrollFreeze(0, 1);
+        ImGui.TableSetupColumn(Loc.T("Time"), ImGuiTableColumnFlags.WidthFixed, Theme.Px(55));
+        ImGui.TableSetupColumn(Loc.T("GCD delay"), ImGuiTableColumnFlags.WidthFixed, Theme.Px(80));
+        ImGui.TableSetupColumn(Loc.T("Actions"), ImGuiTableColumnFlags.WidthStretch, 1.4f);
+        ImGui.TableSetupColumn(Loc.T("Info"), ImGuiTableColumnFlags.WidthStretch, 1f);
+        ImGui.TableHeadersRow();
+
+        // An icon with its name on hover; a GCD framed in gold, an oGCD in red (it caused the clip).
+        void ActionIcon(uint actionId, float size, Vector4 frame)
+        {
+            var pos = ImGui.GetCursorScreenPos();
+            ActionIcons.Draw(ActionIcons.OfAction(actionId), size);
+            ImGui.GetWindowDrawList().AddRect(pos, pos + new Vector2(size, size), Theme.U32(frame, 0.8f), Theme.Px(3), ImDrawFlags.None, Theme.Px(1.5f));
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(ActionIcons.NameOf(actionId));
+        }
+
+        void TextCell(string text, Vector4 color)
+        {
+            ImGui.TableNextColumn();
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + (icon - ImGui.GetTextLineHeight()) / 2);
+            ImGui.TextColored(color, text);
+        }
+
+        foreach (var g in clips)
+        {
+            ImGui.TableNextRow(ImGuiTableRowFlags.None, rowHeight);
+            TextCell(NumberFormat.Duration(TimeSpan.FromSeconds(g.AtSeconds)), Theme.TextFaint);
+            TextCell($"{g.Seconds:0.00}s", g.Seconds >= 0.5 ? Theme.Bad : Theme.Warn);
+
+            // GCD before -> oGCDs woven -> GCD that came late. Pulls recorded before this was kept: the oGCD only.
+            ImGui.TableNextColumn();
+            var weaves = g.Weaves ?? (g.ActionId != 0 ? [g.ActionId] : []);
+            var first = true;
+            void Next()
+            {
+                if (!first)
+                    ImGui.SameLine(0, Theme.Px(3));
+                first = false;
+            }
+
+            if (g.PrevGcdId != 0)
+            {
+                Next();
+                ActionIcon(g.PrevGcdId, icon, Theme.Gold);
+            }
+
+            foreach (var w in weaves)
+            {
+                Next();
+                ImGui.SetCursorPosY(ImGui.GetCursorPosY() + icon * 0.15f);
+                ActionIcon(w, icon * 0.75f, Theme.Bad);
+            }
+
+            if (g.NextGcdId != 0)
+            {
+                Next();
+                ImGui.SetCursorPosY(ImGui.GetCursorPosY() + (icon - ImGui.GetTextLineHeight()) / 2);
+                Theme.Icon(FontAwesomeIcon.AngleRight, Theme.TextFaint);
+                Next();
+                ActionIcon(g.NextGcdId, icon, Theme.Gold);
+            }
+
+            TextCell(g.BetweenSeconds > 0
+                         ? Loc.F("{0:0.00}s between GCDs", g.BetweenSeconds)
+                         : Loc.F("held {0:0.00}s by an animation lock", g.LockedSeconds > 0 ? g.LockedSeconds : g.Seconds),
+                     Theme.TextMuted);
+        }
     }
 
     /// <summary>
@@ -2825,16 +2950,15 @@ public sealed class MainWindow : Window
         }
 
         Part(Loc.T("Clipping"), gcd.ClipSeconds, gcd.ClipCount > 0 ? $" ({gcd.ClipCount}×)" : null, first: true);
-        Part(Loc.T("Late"), gcd.LateSeconds);
-        Part(Loc.T("No GCD"), gcd.NoGcdSeconds, gcd.NoGcdCount > 0 ? $" ({gcd.NoGcdCount}×)" : null);
+        // Late presses and whole GCDs missed are one cause for players: time free to act without a GCD rolling.
+        Part(Loc.T("No GCD"), gcd.LateSeconds + gcd.NoGcdSeconds);
         Part(Loc.T("Dead"), gcd.DeadSeconds);
         ImGui.SameLine(0, Theme.Px(10));
         ImGui.TextColored(gcd.LostGcds >= 1 ? Theme.Warn : Theme.Good, Loc.F("~{0:0.0} GCD lost",gcd.LostGcds));
         Theme.HelpMarker(
             Loc.F("{0} GCDs used, {1:0.00}s each on average. Time with the boss targetable and your GCD ready but unused:\n",gcd.GcdCount,gcd.AverageRecast)
             + Loc.T("- Clipping: held by an oGCD's animation lock. Weave fewer oGCDs per GCD, or earlier.\n")
-            + Loc.T("- Late: free to act, the GCD just came late (reaction, ping, a short step).\n")
-            + Loc.T("- No GCD: a whole GCD or more without one (movement, mechanics). Slidecast, use instant GCDs while moving.\n")
+            + Loc.T("- No GCD: free to act, but no GCD rolling: a GCD pressed late (reaction, ping, a short step) or a whole GCD or more without one (movement, mechanics). Press the next GCD as soon as it is ready, slidecast, use instant GCDs while moving.\n")
             + Loc.T("- Dead: time spent dead."));
 
         if (!showGaps || gcd.Gaps.Count == 0)
@@ -2881,7 +3005,7 @@ public sealed class MainWindow : Window
                    : rows.OrderByDescending(c => c.Dps).ToList();
         var top = rows.Count > 0 ? rows.Max(c => byRdps ? c.Rdps ?? c.Dps : c.Dps) : 0;
 
-        // Share of the party's DPS and of its rDPS (the Limit Break counts in the DPS, like ACT's damage %).
+        // Share of the party's DPS and of its rDPS (the Limit Break counts in the DPS, like the usual meters' damage %).
         var dpsTotal = rows.Sum(c => c.Dps);
         var rdpsTotal = rows.Sum(c => c.Rdps ?? 0);
         static string Share(double value, double total) => total > 0 ? $"{value / total:0.0%}" : "-";
@@ -2889,7 +3013,7 @@ public sealed class MainWindow : Window
         // Without scrolling and with a height of 0, the table takes exactly the height of its rows. In a narrow window it
         // keeps a readable width and scrolls sideways instead, which needs an explicit height.
         var iconSize = ImGui.GetTextLineHeight() + Theme.Px(4);
-        var minWidth = Theme.Px(showRdps ? 720 : 600);
+        var minWidth = Theme.Px(showRdps ? 780 : 660);
         var narrow = ImGui.GetContentRegionAvail().X < minWidth;
         var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.PadOuterX;
         var height = 0f;
@@ -2901,7 +3025,7 @@ public sealed class MainWindow : Window
                      + ImGui.GetStyle().ScrollbarSize + Theme.Px(2);
         }
 
-        using var table = ImRaii.Table("##combatants", showRdps ? 9 : 7, flags, new Vector2(-1, height), narrow ? minWidth : 0);
+        using var table = ImRaii.Table("##combatants", showRdps ? 10 : 8, flags, new Vector2(-1, height), narrow ? minWidth : 0);
         if (!table)
             return;
 
@@ -2917,6 +3041,7 @@ public sealed class MainWindow : Window
 
         ImGui.TableSetupColumn(Loc.T("Crit"), ImGuiTableColumnFlags.WidthStretch, 0.8f);
         ImGui.TableSetupColumn(Loc.T("DH"), ImGuiTableColumnFlags.WidthStretch, 0.8f);
+        ImGui.TableSetupColumn(Loc.T("Crit DH"), ImGuiTableColumnFlags.WidthStretch, 0.9f);
         ImGui.TableSetupColumn(Loc.T("Deaths"), ImGuiTableColumnFlags.WidthFixed, ImGui.CalcTextSize(Loc.T("Deaths")).X + Theme.Px(8));
         ImGui.TableHeadersRow();
 
@@ -2975,6 +3100,8 @@ public sealed class MainWindow : Window
 
             Cell($"{c.CritPercent:0}%", Theme.TextMuted);
             Cell($"{c.DirectHitPercent:0}%", Theme.TextMuted);
+            // Hits that were both a crit and a direct hit (pulls recorded before it was kept have none).
+            Cell(c.CritDirectHitPercent is { } cdh ? $"{cdh:0}%" : "-", Theme.TextMuted);
             Cell(c.Deaths.ToString(), c.Deaths > 0 ? Theme.Bad : Theme.TextFaint);
         }
     }

@@ -158,10 +158,13 @@ public sealed class OpenerWindow : Window
             return;
         }
 
+        var timelineLeft = ImGui.GetCursorPosX();
         DrawTimeline(run!, singleRow: true, Math.Clamp(plugin.Configuration.OpenerCompactScale, 0.5f, 1.5f));
+        // Right edge of the boxes (the timeline ends with a spacer as wide as them).
+        var timelineRight = timelineLeft + ImGui.GetItemRectSize().X;
 
         var transparent = plugin.Configuration.OpenerOpacity < 0.5f;
-        if (Theme.Chip(run!.Started ? Loc.T("Reset") : Loc.T("Start"), run.Started, transparent))
+        if (Theme.Chip(run!.Started ? Loc.T("Reset") : Loc.T("Start"), true, transparent))
         {
             if (run.Started)
                 run = NewRun(opener);
@@ -181,9 +184,90 @@ public sealed class OpenerWindow : Window
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(Loc.T("Size of this window"));
 
-        // Close, at the bottom right.
+        // The same options as in the full window: changing one starts a new try.
         ImGui.SameLine();
-        var closeX = ImGui.GetContentRegionMax().X - (ImGui.CalcTextSize(Loc.T("Close")).X + Theme.Px(20));
+        if (Theme.Chip(Loc.T("Pre-pull"), config.OpenerPrepull, transparent))
+        {
+            config.OpenerPrepull = !config.OpenerPrepull;
+            config.Save();
+        }
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(Loc.T("Include the actions used before the pull. Off: the run starts with the first action after the pull."));
+
+        ImGui.SameLine();
+        if (Theme.Chip(Loc.T("Tincture"), config.OpenerPotion, transparent))
+        {
+            config.OpenerPotion = !config.OpenerPotion;
+            config.Save();
+        }
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(Loc.T("Include the tincture. Off: using an item is ignored."));
+
+        ImGui.SameLine();
+        // Countdown: a small pop-up with its length, and whether Start uses the in-game /countdown (gold when it does).
+        if (Theme.Chip(Loc.F("Countdown {0} s", config.OpenerCountdown), config.OpenerGameCountdown, transparent))
+            ImGui.OpenPopup("##openercompactcountdown");
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(Loc.T("Start launches the in-game /countdown (seen by your party), for a real pull on a striking dummy.\nIn combat the game refuses it: the countdown then runs in this window only.\nA /countdown started by you or anyone in the party also starts a run."));
+
+        using (var countdownPopup = ImRaii.Popup("##openercompactcountdown"))
+        {
+            if (countdownPopup)
+            {
+                ImGui.SetWindowFontScale(1f);
+                var countdown = Math.Clamp(config.OpenerCountdown, 5, 16);
+                ImGui.SetNextItemWidth(Theme.Px(160));
+                if (ImGui.SliderInt("##openercountdown", ref countdown, 5, 16, Loc.T("Countdown %d s")))
+                    config.OpenerCountdown = countdown;
+                if (ImGui.IsItemDeactivatedAfterEdit())
+                    config.Save();
+
+                var useGame = config.OpenerGameCountdown;
+                if (ImGui.Checkbox(Loc.T("Use /countdown"), ref useGame))
+                {
+                    config.OpenerGameCountdown = useGame;
+                    config.Save();
+                }
+            }
+        }
+
+        ImGui.SameLine();
+        if (Theme.Chip(Loc.T("Auto close"), config.OpenerAutoClose, transparent))
+        {
+            config.OpenerAutoClose = !config.OpenerAutoClose;
+            config.Save();
+        }
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(Loc.F("Closes the window by itself once the opener is done, or {0} s after its first action.",config.OpenerAutoCloseSeconds)
+                             + Loc.T("\nRight click the window to change the delay."));
+
+        // Background opacity: a small pop-up with a slider.
+        ImGui.SameLine();
+        if (Theme.Chip(Loc.F("Background {0:0}%", config.OpenerOpacity * 100), false, transparent))
+            ImGui.OpenPopup("##openercompactbg");
+
+        using (var bgPopup = ImRaii.Popup("##openercompactbg"))
+        {
+            if (bgPopup)
+            {
+                ImGui.SetWindowFontScale(1f);
+                var percent = (int)Math.Round(config.OpenerOpacity * 100);
+                ImGui.SetNextItemWidth(Theme.Px(160));
+                if (ImGui.SliderInt("##openerbg", ref percent, 0, 100, "%d%%"))
+                    config.OpenerOpacity = percent / 100f;
+                if (ImGui.IsItemDeactivatedAfterEdit())
+                    config.Save();
+            }
+        }
+
+        // Close, under the end of the boxes. Not at the window's right edge: the window sizes itself to its content,
+        // so it could never get narrower again after a smaller size.
+        ImGui.SameLine();
+        var closeX = timelineRight - (ImGui.CalcTextSize(Loc.T("Close")).X + Theme.Px(20));
         if (closeX > ImGui.GetCursorPosX())
             ImGui.SetCursorPosX(closeX);
         if (Theme.Chip(Loc.T("Close"), false, transparent))
@@ -211,9 +295,9 @@ public sealed class OpenerWindow : Window
         var gameCountdown = UseGameCountdown(config);
         run = NewRun(opener);
         if (gameCountdown)
-            SendChatCommand($"/countdown {Math.Clamp(config.OpenerCountdown, 5, 30)}"); // picked up by FollowGameCountdown
+            SendChatCommand($"/countdown {Math.Clamp(config.OpenerCountdown, 5, 16)}"); // picked up by FollowGameCountdown
         else
-            run.Start(config.OpenerCountdown);
+            run.Start(Math.Clamp(config.OpenerCountdown, 5, 16));
     }
 
     private void DrawContent()
@@ -276,7 +360,7 @@ public sealed class OpenerWindow : Window
         ImGui.SameLine();
         var countdown = config.OpenerCountdown;
         ImGui.SetNextItemWidth(Theme.Px(130));
-        if (ImGui.SliderInt("##countdown", ref countdown, 5, 30, Loc.T("Countdown %d s")))
+        if (ImGui.SliderInt("##countdown", ref countdown, 5, 16, Loc.T("Countdown %d s")))
             config.OpenerCountdown = countdown;
         if (ImGui.IsItemDeactivatedAfterEdit())
             config.Save();

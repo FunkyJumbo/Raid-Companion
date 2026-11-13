@@ -8,7 +8,6 @@ using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Plugin.Services;
 using Dalamud.Utility;
 using DpsInServerBar.Combat;
-using DpsInServerBar.Fflogs;
 using DpsInServerBar.Tracking;
 using DpsInServerBar.Ultimates;
 
@@ -120,7 +119,6 @@ public sealed class DtrController : IDisposable
             BarElement.Uptime => new Segment(Loc.T("GCD 98.7%")),
             BarElement.Duration => new Segment("3:42"),
             BarElement.DotUptime => new Segment(Loc.T("DoT 97.1%")),
-            BarElement.Percentile => new Segment("~87", Color: config.UseColors ? FflogsNames.Color(87) : null),
             _ => new Segment(element.ToString()),
         };
     }
@@ -316,11 +314,6 @@ public sealed class DtrController : IDisposable
             case BarElement.Duration:
                 return new Segment(NumberFormat.Duration(snapshot.Encounter.Duration));
 
-            case BarElement.Percentile:
-                return plugin.EstimatePercentile(snapshot) is { } pct
-                           ? new Segment($"~{pct:0}", Color: config.UseColors ? FflogsNames.Color(pct) : null)
-                           : null;
-
             default:
                 return null;
         }
@@ -475,9 +468,6 @@ public sealed class DtrController : IDisposable
 
             if (plugin.Dots.Current is { Count: > 0 } dots && dots[0].AvailableSeconds >= 5)
                 sb.Append(Loc.F("\nDoT uptime: {0}",string.Join(" | ", dots.Select(d => $"{d.Name} {d.Uptime:0.0%}"))));
-
-            if (plugin.EstimatePercentile(snapshot) is { } percentile)
-                sb.Append(Loc.F("\nFFLogs percentile (estimate): ~{0:0}",percentile));
 
             if (plugin.History.BestFor(enc.Title) is { } best)
                 sb.Append(Loc.F("\nYour best here: {0} DPS",NumberFormat.Format(best.YourDps, config.NumberStyle)));
