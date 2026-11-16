@@ -396,11 +396,7 @@ public static class Theme
     /// <summary>
     /// Pills to switch between views, with a gold underline on the selected one. Returns true when it changed.
     /// </summary>
-    public static bool TabStrip(string id, ref int selected, params (FontAwesomeIcon Icon, string Label)[] tabs) =>
-        TabStrip(id, ref selected, null, tabs);
-
-    /// <summary>Same, with a menu on right click of a tab (its content drawn by <paramref name="contextMenu"/>, given the tab).</summary>
-    public static bool TabStrip(string id, ref int selected, System.Action<int>? contextMenu, params (FontAwesomeIcon Icon, string Label)[] tabs)
+    public static bool TabStrip(string id, ref int selected, params (FontAwesomeIcon Icon, string Label)[] tabs)
     {
         var changed = false;
         var dl = ImGui.GetWindowDrawList();
@@ -425,12 +421,6 @@ public static class Theme
             }
 
             var hovered = ImGui.IsItemHovered();
-            if (contextMenu is not null)
-            {
-                using var popup = ImRaii.ContextPopupItem($"##{id}menu{i}");
-                if (popup)
-                    contextMenu(i);
-            }
 
             var isSelected = selected == i;
             var max = pos + size;

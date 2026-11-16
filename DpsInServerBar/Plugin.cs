@@ -81,8 +81,9 @@ public sealed class Plugin : IDalamudPlugin
         Gauges = new GaugeTracker(JobGauges, ObjectTable, combat, DataManager);
         native.LocalActionUsed += Gauges.OnActionUsed;
         native.LocalActionUsed += Uptime.OnActionUsed;
-        Combos = new ComboTracker(ObjectTable, combat, DataManager);
+        Combos = new ComboTracker(ObjectTable, JobGauges, combat, DataManager);
         native.LocalActionUsed += Combos.OnActionUsed;
+        native.LocalDamage += Combos.OnDamage;
         Positionals = new PositionalTracker(ObjectTable, combat, DataManager, Log);
         native.LocalDamage += Positionals.OnHit;
         Dots = new DotTracker(ObjectTable, combat, DataManager, () => Uptime.EnemyTargetable, () => Boss.Current?.EntityId ?? 0);

@@ -401,7 +401,7 @@ public sealed class ConfigWindow : Window
 
                 if (ImGui.IsItemHovered())
                 {
-                    var shown = preset.Layout.Where(e => e.Enabled).Select(e => Describe(e.Element).Label).ToList();
+                    var shown = preset.Layout.Where(e => e.Enabled).Select(e => Describe(e.Element, preset.RankInRole).Label).ToList();
                     var metric = preset.Metric switch
                     {
                         DisplayMetric.Party => Loc.T("Party DPS"),
@@ -835,7 +835,7 @@ public sealed class ConfigWindow : Window
             }
 
             ImGui.TableNextColumn();
-            var (label, example, help) = Describe(item.Element);
+            var (label, example, help) = Describe(item.Element, c.RankInRole);
             var enabled = item.Enabled;
             if (ImGui.Checkbox(label, ref enabled))
             {
@@ -847,17 +847,32 @@ public sealed class ConfigWindow : Window
                 Help(help);
 
             ImGui.TableNextColumn();
-            ImGui.TextDisabled(example);
+            if (item.Element == BarElement.Rank)
+            {
+                // The example is a button: rank in the party, or in your role with the gap.
+                if (Theme.Chip(example, true))
+                {
+                    c.RankInRole = !c.RankInRole;
+                    changed = true;
+                }
+
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(Loc.T("Click to switch between your rank in the party and your rank in your role."));
+            }
+            else
+            {
+                ImGui.TextDisabled(example);
+            }
         }
 
         return changed;
     }
 
-    private static (string Label, string Example, string? Help) Describe(BarElement element) => element switch
+    private static (string Label, string Example, string? Help) Describe(BarElement element, bool rankInRole) => element switch
     {
-        BarElement.Rank => (Loc.T("Rank in the party"), "#2", Loc.T("Personal DPS and rDPS only, when in a party.")),
-        BarElement.RoleGap => (Loc.T("Rank in your role and gap"), "#1 (+8%)",
-                               Loc.T("Compared with players of your role only (tanks, healers or DPS): with the first one, or with the second one when you are first. Uses rDPS when the metric is rDPS.")),
+        BarElement.Rank when !rankInRole => (Loc.T("Rank in the party"), "#2", Loc.T("Personal DPS and rDPS only, when in a party.")),
+        BarElement.Rank => (Loc.T("Rank in your role and gap"), "#1 (+8%)",
+                            Loc.T("Compared with players of your role only (tanks, healers or DPS): with the first one, or with the second one when you are first. Uses rDPS when the metric is rDPS.")),
         BarElement.Value => (Loc.T("Value"), Loc.T("21,234 DPS"), null),
         BarElement.Pace => (Loc.T("Pace vs your best pull"), Loc.T("Best +4%"),
                             Loc.T("Damage done so far compared with your best pull of the same encounter, at the same second.")),

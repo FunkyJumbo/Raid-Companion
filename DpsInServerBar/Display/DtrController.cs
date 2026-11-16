@@ -104,8 +104,7 @@ public sealed class DtrController : IDisposable
         var label = MetricLabel(config.Metric);
         return element switch
         {
-            BarElement.Rank => new Segment("#2"),
-            BarElement.RoleGap => new Segment("#1 (+8%)", Color: good),
+            BarElement.Rank => config.RankInRole ? new Segment("#1 (+8%)", Color: good) : new Segment("#2"),
             BarElement.Value => config.Metric switch
             {
                 DisplayMetric.Party => new Segment($"{NumberFormat.Format(182_345, config.NumberStyle)} {label} (+3.2%)", Color: good),
@@ -211,14 +210,15 @@ public sealed class DtrController : IDisposable
         var you = snapshot.You;
         switch (element)
         {
-            case BarElement.Rank:
+            case BarElement.Rank when !config.RankInRole:
                 // The rank only makes sense for your own (r)DPS, and when there is someone to compare to.
                 if (config.Metric == DisplayMetric.Party || snapshot.Combatants.Count(c => c.HasJob) < 2)
                     return null;
                 var rank = snapshot.YourRank(byRdps: config.Metric == DisplayMetric.Raid);
                 return rank > 0 ? new Segment($"#{rank}") : null;
 
-            case BarElement.RoleGap:
+            case BarElement.Rank:
+                // Among the players of your role, with the gap to the first one (or to the second when you are first).
                 if (config.Metric == DisplayMetric.Party
                     || snapshot.YourRoleStanding(byRdps: config.Metric == DisplayMetric.Raid) is not { Count: > 1, Gap: { } gap } standing)
                 {

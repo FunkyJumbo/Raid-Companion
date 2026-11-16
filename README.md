@@ -103,8 +103,8 @@ During the fight, two minimalist displays keep your UI clean:
   uptime. Zoom in with the mouse wheel, drag to move along the fight, double click to see it whole again.
 - **Personal** — your own play, only what your job has: **GCD uptime**, **gauge overcap** (job gauge lost because it
   was too full when an action filled it), **positionals** (melee jobs, read from the bonus the game gave each hit;
-  each positional action with how many landed, green until the first miss), **combo errors** (wrong step, combo
-  restarted, combo timer ran out), **DoT uptime**, **overheal** (healers) and **tank swaps** (tanks: who had the
+  each positional action with how many landed, green until the first miss), **rotation errors** (wrong combo step, combo
+  restarted, combo timer ran out, and job errors: Paladin and Warrior buffs that ran out unused, Warrior actions used without Surging Tempest, Dark Knight Delirium combo broken, Gunbreaker Gnashing Fang combo broken or continuation lost, unbroken The Blackest Night, Paladin Holy Spirit or Holy Circle spending a Requiescat charge from level 80), **DoT uptime**, **overheal** (healers) and **tank swaps** (tanks: who had the
   boss, and why the swap happened).
 - **Party** — every player's DPS, rDPS, damage %, crit, direct hit, crit direct hit and deaths, sortable by DPS or rDPS. Hover an rDPS
   value to see what the player gave to / received from buffs.
@@ -129,8 +129,7 @@ and can be **reordered**, with the separator of your choice between them (space,
 
 | Element | Example | What it shows |
 |---|---|---|
-| Rank | `#2` | Your rank in the party |
-| Rank in your role | `#1 (+8%)` | Rank among tanks, healers or DPS only, and the gap to #1 (or to #2 when you are first) |
+| Rank | `#2` or `#1 (+8%)` | Your rank in the party; click the example in the settings to show instead your rank among tanks, healers or DPS only, with the gap to #1 (or to #2 when you are first) |
 | Value | `21,234 DPS` | Personal DPS, party DPS (pDPS) or rDPS |
 | Pace | `Best +4%` | Damage so far vs. your best **kill** of this fight, at the same second |
 | Enrage timer | `Enrage 3:12` | Time left before the enrage entered for this fight — red for the last 30 seconds |
@@ -191,7 +190,7 @@ can compare your damage stats between two pulls. In the settings you choose the 
 - **Personal** — the same lines as Live, each foldable for its detail: GCD uptime (uptime per ultimate phase, GCD
   analysis splitting the lost time into clipping, no GCD and dead, clipping timeline with the oGCD behind each
   clip, and a table of the clips: the GCD before, the oGCDs woven, the GCD that came late and the time between the
-  two), gauge overcap (the actions that overcapped each gauge), positionals and combo errors (each miss with its time),
+  two), gauge overcap (the actions that overcapped each gauge), positionals and rotation errors (each miss with its time),
   DoT uptime (each time a DoT stayed off the boss), overheal (per heal action and HoT), tank swaps and your mitigation.
   History also shows the **DPS lost to Damage Down and to Weakness / Brink of Death** after a raise (*experimental*, estimated from
   your damage while each debuff was on, with each one listed).
@@ -236,13 +235,13 @@ your static, and tick the **pulls** that matter to leave the others out.
 
 ### Screenshots
 
-Right click the Live, History or Progression tab and choose **Screenshot**: the whole view is saved as a PNG in
+Click the camera in the main window's title bar: the view shown (Live, History or Progression) is saved whole as a PNG in
 `Pictures\Raid Companion`, even when the window is smaller than its content or taller than your screen (it is then
 captured in slices put back together). Pair it with **Hide player names** (Settings > Display) to share it without
 real names: every player gets a made-up name, always the same one.
 
-The other windows too: the camera in the title bar of the settings (the whole page) and of the opener practice,
-or **Screenshot** in the right click menu of the compact DPS meter and of the compact opener practice.
+The other windows too: the same camera in the title bar of the settings (the whole page), the opener practice
+and the opener editor, or **Screenshot** in the right click menu of the compact DPS meter and of the compact opener practice.
 
 <br>
 
@@ -294,7 +293,7 @@ ultimate these lines replace the pull summary.
 ## Opener practice
 
 <p align="center">
-  <img src="docs/images/opener.png" width="820" alt="The opener practice window with the Black Mage standard 5+7 opener: options, the opener track with GCDs and oGCDs, the next action, the ready check and The Balance's notes"><br>
+  <img src="docs/images/opener.png" width="820" alt="The opener practice window with the Black Mage standard 5+7 opener: Start, Reset, countdown, pre-pull, tincture, /countdown and auto close options, the opener track with GCDs and oGCDs, the next action, the ready check and The Balance's notes"><br>
   <sub>The Black Mage standard opener, ready to start, with The Balance's notes.</sub>
 </p>
 
@@ -305,7 +304,7 @@ when you use it during a fight. The Balance's notes are there too if you need th
 practice* in the Live tab.
 
 <p align="center">
-  <img src="docs/images/opener-compact.png" width="820" alt="The opener practice in compact mode: only the opener track, with Start, Full view, the background opacity and Close"><br>
+  <img src="docs/images/opener-compact.png" width="820" alt="The opener practice in compact mode: only the opener track, with Start, Full view, the size, Pre-pull, Tincture, the countdown, Auto close, the background opacity and Close"><br>
   <sub><b>Compact mode</b>: only the opener track, to keep it on screen during a fight.</sub>
 </p>
 

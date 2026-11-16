@@ -70,7 +70,9 @@ public enum BarElement
     JobIcon,
     /// <summary>Removed.</summary>
     JobName,
+    /// <summary>Your rank in the party, or in your role with the gap (<see cref="Configuration.RankInRole"/>).</summary>
     Rank,
+    /// <summary>Removed (merged into Rank).</summary>
     RoleGap,
     Value,
     Pace,
@@ -177,6 +179,7 @@ public sealed class BarPreset
     public DisplayMetric Metric { get; set; }
     public NumberStyle NumberStyle { get; set; } = NumberStyle.Grouped;
     public string Separator { get; set; } = " ";
+    public bool RankInRole { get; set; }
 
     [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
     public List<BarElementSetting> Layout { get; set; } = [];
@@ -187,6 +190,7 @@ public sealed class BarPreset
         Metric = c.Metric;
         NumberStyle = c.NumberStyle;
         Separator = c.BarSeparator;
+        RankInRole = c.RankInRole;
         Layout = CopyLayout(c.BarLayout);
     }
 
@@ -196,6 +200,7 @@ public sealed class BarPreset
         c.Metric = Metric;
         c.NumberStyle = NumberStyle;
         c.BarSeparator = Separator;
+        c.RankInRole = RankInRole;
         c.BarLayout = CopyLayout(Layout);
         c.Migrate(); // elements added since the preset was saved show up, hidden
     }
@@ -205,6 +210,7 @@ public sealed class BarPreset
         Metric == c.Metric
         && NumberStyle == c.NumberStyle
         && Separator == c.BarSeparator
+        && RankInRole == c.RankInRole
         && Layout.Select(e => (e.Element, e.Enabled)).SequenceEqual(c.BarLayout.Select(e => (e.Element, e.Enabled)));
 
     private static List<BarElementSetting> CopyLayout(IEnumerable<BarElementSetting> layout) =>
@@ -214,7 +220,7 @@ public sealed class BarPreset
 [Serializable]
 public sealed class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 11;
+    public int Version { get; set; } = 12;
 
     /// <summary>Order and visibility of the elements of the server bar text.</summary>
     [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
@@ -225,6 +231,9 @@ public sealed class Configuration : IPluginConfiguration
     public NumberStyle NumberStyle { get; set; } = NumberStyle.Grouped;
     /// <summary>Text placed between the elements of the server bar (a space by default, e.g. " | ").</summary>
     public string BarSeparator { get; set; } = " ";
+
+    /// <summary>The Rank element shows your rank among the players of your role, with the gap, instead of your rank in the party.</summary>
+    public bool RankInRole { get; set; }
 
     /// <summary>Saved server bar setups, numbered from 1 for /raidcompanion preset N.</summary>
     [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
@@ -446,6 +455,15 @@ public sealed class Configuration : IPluginConfiguration
     {
         var changed = false;
 
+        // "Rank in your role" was an element of its own: it is now a mode of Rank. Read before the older steps below,
+        // which drop the removed elements from the layouts.
+        if (Version < 12)
+        {
+            RankInRole = MergeRoleRank(BarLayout);
+            foreach (var preset in BarPresets)
+                preset.RankInRole = MergeRoleRank(preset.Layout);
+        }
+
         if (CompactTransparent is { } transparent)
         {
             CompactOpacity = transparent ? 0f : 1f;
@@ -551,6 +569,15 @@ public sealed class Configuration : IPluginConfiguration
             changed = true;
         }
 
+        if (Version < 12)
+        {
+            BarLayout.RemoveAll(e => RemovedElements.Contains(e.Element));
+            foreach (var preset in BarPresets)
+                preset.Layout.RemoveAll(e => RemovedElements.Contains(e.Element));
+            Version = 12;
+            changed = true;
+        }
+
         // Elements added in later versions show up, hidden, at the end.
         foreach (var element in Enum.GetValues<BarElement>().Except(RemovedElements))
         {
@@ -566,7 +593,18 @@ public sealed class Configuration : IPluginConfiguration
 
     /// <summary>Bar elements that no longer exist.</summary>
     public static readonly BarElement[] RemovedElements =
-        [BarElement.FinalMarker, BarElement.KillTime, BarElement.JobIcon, BarElement.JobName, BarElement.BossHp, BarElement.Percentile];
+        [BarElement.FinalMarker, BarElement.KillTime, BarElement.JobIcon, BarElement.JobName, BarElement.BossHp, BarElement.Percentile, BarElement.RoleGap];
+
+    /// <summary>True when the old "rank in your role" element was shown: Rank then takes its place (and is shown).</summary>
+    private static bool MergeRoleRank(List<BarElementSetting> layout)
+    {
+        if (!layout.Any(e => e.Element == BarElement.RoleGap && e.Enabled))
+            return false;
+
+        foreach (var e in layout.Where(e => e.Element == BarElement.Rank))
+            e.Enabled = true;
+        return true;
+    }
 
     private void SetShown(BarElement element, bool shown)
     {
@@ -577,7 +615,6 @@ public sealed class Configuration : IPluginConfiguration
     private static List<BarElementSetting> DefaultLayout() =>
     [
         new() { Element = BarElement.Rank },
-        new() { Element = BarElement.RoleGap, Enabled = false },
         new() { Element = BarElement.Value },
         new() { Element = BarElement.Pace, Enabled = false },
         new() { Element = BarElement.EnrageTimer, Enabled = false },

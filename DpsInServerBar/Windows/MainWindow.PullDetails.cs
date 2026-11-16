@@ -428,7 +428,7 @@ public sealed partial class MainWindow
 
     private static void FoldCombos(IReadOnlyList<ComboMistake> mistakes)
     {
-        var open = Fold(Loc.T("Combo errors"), "pcombo");
+        var open = Fold(Loc.T("Rotation errors"), "pcombo");
         ImGui.TextColored(Theme.Bad, mistakes.Count.ToString());
         foreach (var group in mistakes.GroupBy(m => m.ActionId).OrderByDescending(g => g.Count()))
         {
@@ -449,7 +449,7 @@ public sealed partial class MainWindow
                 {
                     ImGui.TableNextRow();
                     TimeCell(m.AtSeconds);
-                    IconCell(ActionIcons.OfAction(m.ActionId), GameNames.Action(m.ActionId, m.Action));
+                    IconCell(ActionIcons.OfAction(m.ActionId), ComboMistakeName(m));
                     ImGui.TableNextColumn();
                     ImGui.TextColored(Theme.TextMuted, ComboMistakeDetail(m));
                 }
@@ -799,7 +799,7 @@ public sealed partial class MainWindow
         if (mistakes.Count == 0 && !showNone)
             return;
 
-        ImGui.TextColored(Theme.TextMuted, Loc.T("Combo errors"));
+        ImGui.TextColored(Theme.TextMuted, Loc.T("Rotation errors"));
         ImGui.SameLine(0, Theme.Px(6));
         if (mistakes.Count == 0)
         {
@@ -815,14 +815,18 @@ public sealed partial class MainWindow
                 ImGui.SameLine(0, Theme.Px(10));
                 var hovered = ActionIcons.Draw(ActionIcons.OfAction(group.Key), iconSize);
                 ImGui.SameLine(0, Theme.Px(4));
-                ImGui.TextColored(Theme.Bad, names ? $"{GameNames.Action(list[0].ActionId, list[0].Action)} ×{list.Count}" : $"×{list.Count}");
+                ImGui.TextColored(Theme.Bad, names ? $"{ComboMistakeName(list[0])} ×{list.Count}" : $"×{list.Count}");
                 if (hovered || ImGui.IsItemHovered())
                     ImGui.SetTooltip(string.Join("\n", list.Select(ComboMistakeText)));
             }
         }
 
-        Theme.HelpMarker(Loc.T("Combo steps used without the step before them (they lose their combo bonus), combos restarted before they were finished, and combos whose timer ran out before the next step. Actions the game lets you use without breaking a combo are ignored."));
+        Theme.HelpMarker(Loc.T("Combo steps used without the step before them (they lose their combo bonus), combos restarted before they were finished, combos whose timer ran out before the next step, and job errors: buffs that ran out unused (Paladin: Goring Blade, Divine Might, Requiescat, Blade of Honor, Atonement, Confiteor; Warrior: Inner Release, Berserk, Primal Rend, Primal Ruination, Nascent Chaos, Wrathful; Dark Knight: Scorn, Delirium; Gunbreaker: Ready to Break, Ready to Reign, and each continuation, also when the next GCD replaces it), offensive actions used without a buff that must stay up (Warrior: Surging Tempest, after the 3 GCDs allowed to put it back at the pull or after downtime; Dark Knight: Darkside, after 1 GCD), and a Paladin Holy Spirit or Holy Circle spending a Requiescat charge from level 80, Dark Knight Delirium combo broken by a basic combo step, Gunbreaker Gnashing Fang combo broken (basic combos, Sonic Break, Double Down), The Blackest Night running out without breaking, and Salted Earth ending without Salt and Darkness. Actions the game lets you use without breaking a combo are ignored."));
     }
+
+    // The buff for a time without it (its line shows the buff, not the action that puts it up), else the action.
+    private static string ComboMistakeName(ComboMistake m) =>
+        m.Kind == ComboMistakeKind.WithoutBuff ? GameNames.Status(m.ExpectedId, m.Expected) : GameNames.Action(m.ActionId, m.Action);
 
     private static string ComboMistakeText(ComboMistake m) =>
         $"{NumberFormat.Duration(TimeSpan.FromSeconds(m.AtSeconds))}  {ComboMistakeDetail(m)}";
@@ -830,6 +834,15 @@ public sealed partial class MainWindow
     private static string ComboMistakeDetail(ComboMistake m) => m.Kind switch
     {
         ComboMistakeKind.NoCombo => Loc.F("{0} without its combo (needs {1} before)",GameNames.Action(m.ActionId, m.Action),GameNames.Action(m.ExpectedId, m.Expected)),
+        ComboMistakeKind.WrongCharge => Loc.F("{0} spent a charge of {1}: from level 80 they go to Confiteor and its combo",GameNames.Action(m.ActionId, m.Action),GameNames.Action(m.ExpectedId, m.Expected)),
+        ComboMistakeKind.BuffExpired when m.Expired => Loc.F("{0} lost unused: the next GCD came first",GameNames.Status(m.ExpectedId, m.Expected)),
+        ComboMistakeKind.BuffExpired when m.Count > 1 => Loc.F("{0} ran out with {1} charges unused",GameNames.Status(m.ExpectedId, m.Expected),m.Count),
+        ComboMistakeKind.BuffExpired when m.Count == 1 => Loc.F("{0} ran out with 1 charge unused",GameNames.Status(m.ExpectedId, m.Expected)),
+        ComboMistakeKind.WithoutBuff when m.Count > 1 => Loc.F("{0} missing: {1} offensive actions without it, for {2:0}s",GameNames.Status(m.ExpectedId, m.Expected),m.Count,m.EndSeconds - m.AtSeconds),
+        ComboMistakeKind.WithoutBuff => Loc.F("{0} missing: 1 offensive action without it",GameNames.Status(m.ExpectedId, m.Expected)),
+        ComboMistakeKind.ShieldUnbroken => Loc.F("{0} ran out without breaking: no free {1}",GameNames.Action(m.ActionId, m.Action),GameNames.Action(m.ExpectedId, m.Expected)),
+        ComboMistakeKind.FollowUpMissed => Loc.F("{0} not used before the end of {1}",GameNames.Action(m.ActionId, m.Action),GameNames.Action(m.ExpectedId, m.Expected)),
+        ComboMistakeKind.BuffExpired => Loc.F("{0} ran out unused",GameNames.Status(m.ExpectedId, m.Expected)),
         ComboMistakeKind.TimedOut => Loc.F("combo lost after {0}: its timer ran out before the next step",GameNames.Action(m.ActionId, m.Action)),
         _ => Loc.F("{0} restarted the combo: {1} was waiting for its next step",GameNames.Action(m.ActionId, m.Action),GameNames.Action(m.ExpectedId, m.Expected)),
     };

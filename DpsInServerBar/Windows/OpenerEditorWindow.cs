@@ -53,7 +53,11 @@ public sealed class OpenerEditorWindow : Window
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(700, 400), MaximumSize = new Vector2(4000, 4000) };
         AllowBackgroundBlur = false;
         plugin.OpenerTracker.ActionUsed += OnActionUsed;
+        shot = new WindowShot(this);
+        TitleBarButtons.Add(shot.TitleBarButton(() => Loc.T("Opener editor")));
     }
+
+    private readonly WindowShot shot;
 
     /// <summary>True while recording: the opener practice hook must stay on.</summary>
     public bool Recording => recording && IsOpen;
@@ -77,7 +81,11 @@ public sealed class OpenerEditorWindow : Window
 
     public override void OnClose() => SetRecording(false);
 
-    public override void PreDraw() => themeScope = Theme.Push();
+    public override void PreDraw()
+    {
+        themeScope = Theme.Push();
+        shot.PreDraw();
+    }
 
     public override void PostDraw()
     {
@@ -87,6 +95,7 @@ public sealed class OpenerEditorWindow : Window
 
     public override void Draw()
     {
+        shot.Step();
         FollowPull();
         DrawTopBar();
         Theme.Rule();

@@ -59,15 +59,15 @@ public sealed class WindowShot
         frames = 0;
     }
 
-    /// <summary>A camera button in the window's title bar.</summary>
-    public TitleBarButton TitleBarButton(Func<string> view, Func<float?>? contentHeight = null) => new()
+    /// <summary>A camera button in the window's title bar (arguments: see <see cref="Request"/>).</summary>
+    public TitleBarButton TitleBarButton(Func<string> view, Func<float?>? contentHeight = null, Action? onStart = null) => new()
     {
         Icon = Dalamud.Interface.FontAwesomeIcon.Camera,
         IconOffset = new Vector2(1.5f, 1),
         Click = button =>
         {
             if (button == ImGuiMouseButton.Left)
-                Request(view(), contentHeight);
+                Request(view(), contentHeight, onStart);
         },
         ShowTooltip = () => ImGui.SetTooltip(Loc.T("Screenshot: saves a picture of this window in Pictures\\Raid Companion.")),
         Priority = -1,

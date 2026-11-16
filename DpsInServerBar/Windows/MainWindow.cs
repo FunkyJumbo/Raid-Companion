@@ -60,6 +60,7 @@ public sealed partial class MainWindow : Window
         Size = new Vector2(760, 640);
         SizeCondition = ImGuiCond.FirstUseEver;
         shot = new WindowShot(this);
+        TitleBarButtons.Add(shot.TitleBarButton(() => TabNames[selectedTab], ShotHeight, OnScreenshotStart));
     }
 
     /// <summary>History tab with this pull selected (when it is still recorded).</summary>
@@ -115,7 +116,7 @@ public sealed partial class MainWindow : Window
 
     private int CurrentView => selectedTab;
 
-    // Screenshot of a view (right click on its tab): the view is shown, the window grows to its whole content,
+    // Screenshot of the view shown (camera in the title bar): the window grows to its whole content,
     // is captured and saved, then gets its size and place back.
     private readonly WindowShot shot;
     private static string[] TabNames => [Loc.T("Live"), Loc.T("History"), Loc.T("Progression")];
@@ -128,14 +129,11 @@ public sealed partial class MainWindow : Window
     // Top of the graph that fills the rest of the window (Live, Progression), to know the height of everything above.
     private float? graphTop;
 
-    private void StartScreenshot(int tab)
+    // The pull list keeps its height while the window grows: the first content height read is corrected for it.
+    private void OnScreenshotStart()
     {
-        selectedTab = tab;
-        shot.Request(TabNames[tab], ShotHeight, () =>
-        {
-            shotPullListHeight = selectedTab == 1 && pullListHeight > 0 ? pullListHeight : null;
-            shotListDelta = shotPullListHeight is null ? 0 : pullListFullHeight - pullListHeight;
-        });
+        shotPullListHeight = selectedTab == 1 && pullListHeight > 0 ? pullListHeight : null;
+        shotListDelta = shotPullListHeight is null ? 0 : pullListFullHeight - pullListHeight;
     }
 
     // Height of the whole view: everything shown, a graph filling the window at a readable height.
@@ -161,13 +159,7 @@ public sealed partial class MainWindow : Window
     public override void Draw()
     {
         shot.Step();
-        Theme.TabStrip("main", ref selectedTab, tab =>
-                       {
-                           if (ImGui.MenuItem(Loc.T("Screenshot"), false, shot.Ready))
-                               StartScreenshot(tab);
-                           if (ImGui.IsItemHovered())
-                               ImGui.SetTooltip(Loc.T("Saves a picture of this view, the window grown to show all of it, in Pictures\\Raid Companion."));
-                       },
+        Theme.TabStrip("main", ref selectedTab,
                        (FontAwesomeIcon.Bolt, Loc.T("Live")), (FontAwesomeIcon.History, Loc.T("History")), (FontAwesomeIcon.ChartLine, Loc.T("Progression")));
         DrawSourceAndSettings();
         Theme.Rule(2);

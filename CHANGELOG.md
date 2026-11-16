@@ -3,7 +3,14 @@
 <!-- One "## <version>" section per release. The Release workflow publishes the section of the tagged
      version as the GitHub release notes; the same notes go into pluginmaster.json (shown in Dalamud). -->
 
+## 1.0.6.0
+
+- Combo errors are now rotation errors, with errors of their own for Paladin, Warrior, Dark Knight and Gunbreaker: buffs that ran out unused, actions used without Surging Tempest or Darkside, Delirium and Gnashing Fang combos broken, lost continuations, a wasted The Blackest Night, and more (hover the "?" for the list).
+- Server bar: the two rank elements are now one. Tick Rank for your rank in the party, and click its example in the settings to switch to your rank in your role.
+- Screenshots: a camera in the title bar of the main window (instead of the right click on its tabs) and of the opener editor.
+
 ## 1.0.5.0
+
 - Opener editor: make your own openers, edit a copy of a built-in one, record one by playing it, and share them with a code (/raidcompanion opener edit, or the pencil in the opener practice).
 - Screenshots of the settings, the compact DPS meter and the opener practice (full and compact).
 - New plugin icon.
