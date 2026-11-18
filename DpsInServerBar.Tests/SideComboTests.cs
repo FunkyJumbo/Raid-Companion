@@ -48,4 +48,30 @@ public class SideComboTests
         c.OnAction(16137, 40);
         Assert.Empty(broken);
     }
+
+    [Fact]
+    public void GnashingFangBreaksReign()
+    {
+        var combo = GunbreakerRules.ReignCombo();
+        var broken = new List<uint>();
+        combo.Broken += (_, action, _) => broken.Add(action);
+        combo.OnAction(GunbreakerRules.ReignOfBeasts, 0);
+        combo.OnAction(GunbreakerRules.SonicBreak, 2.5); // not a breaker
+        combo.OnAction(GunbreakerRules.GnashingFang, 5);
+        Assert.Equal([GunbreakerRules.GnashingFang], broken);
+    }
+
+    [Fact]
+    public void BasicAoeBreaksReign()
+    {
+        var combo = GunbreakerRules.ReignCombo();
+        var broken = new List<uint>();
+        combo.Broken += (_, action, _) => broken.Add(action);
+        combo.OnAction(GunbreakerRules.ReignOfBeasts, 0);
+        combo.OnAction(GunbreakerRules.NobleBlood, 2.5);
+        combo.OnAction(16149, 5); // Demon Slaughter
+        combo.OnAction(GunbreakerRules.ReignOfBeasts, 30);
+        combo.OnAction(GunbreakerRules.FatedCircle, 32.5);
+        Assert.Equal([16149u, GunbreakerRules.FatedCircle], broken);
+    }
 }

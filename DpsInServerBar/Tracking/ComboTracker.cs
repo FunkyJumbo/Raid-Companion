@@ -32,6 +32,12 @@ public enum ComboMistakeKind
 
     /// <summary>An action left unused while it could be (Dark Knight: Salt and Darkness during Salted Earth).</summary>
     FollowUpMissed,
+
+    /// <summary>A combo kept apart from the basic one (Gunbreaker Gnashing Fang, Dark Knight Delirium) broken before its end.</summary>
+    SideComboBroken,
+
+    /// <summary>A combo started again over itself while steps were left (Paladin: Royal Authority over the Atonement combo).</summary>
+    ComboOverwritten,
 }
 
 /// <summary>One combo error in a pull.</summary>
@@ -44,10 +50,13 @@ public enum ComboMistakeKind
 /// WithoutBuff: one per time without the buff. ActionId is the action that puts it up (its icon), ExpectedId the buff
 /// (status id), Expected its name, Count the offensive actions used without it, AtSeconds to EndSeconds the first to the last.
 /// ShieldUnbroken: ActionId is the shield, ExpectedId the action it would have made free.
-/// FollowUpMissed: ActionId is the action not used, ExpectedId the one that allowed it.</remarks>
+/// FollowUpMissed: ActionId is the action not used, ExpectedId the one that allowed it.
+/// SideComboBroken: ActionId is the combo (Continuation, Delirium: its icon), ExpectedId the action that broke it, StepId
+/// the last step done.
+/// ComboOverwritten: ActionId is the combo (its icon), ExpectedId the action that replaced it, StepId the step still to use.</remarks>
 public sealed record ComboMistake(
     double AtSeconds, ComboMistakeKind Kind, uint ActionId, string Action, uint ExpectedId, string Expected, bool Expired,
-    int Count = 0, double EndSeconds = 0);
+    int Count = 0, double EndSeconds = 0, uint StepId = 0, string Step = "");
 
 /// <summary>
 /// Finds your combo errors (1-2-3 combos): a step used without the one before it (wrong button), a combo restarted
@@ -87,6 +96,7 @@ public sealed unsafe class ComboTracker
     private int outageIndex = -1;
     private readonly DarkKnightRules darkKnight = new();
     private readonly SideCombo gnashingFang = GunbreakerRules.GnashingFangCombo();
+    private readonly SideCombo reign = GunbreakerRules.ReignCombo();
     private readonly Dictionary<uint, bool> gcds = new();
     private readonly List<(ushort Id, float Remaining, int Param)> statuses = [];
     private readonly Dictionary<uint, string> statusNames = new();
@@ -103,6 +113,12 @@ public sealed unsafe class ComboTracker
         this.objectTable = objectTable;
         this.combat = combat;
         this.dataManager = dataManager;
+        paladin.AtonementOverwritten += (at, step) =>
+        {
+            if (mistakes.Count < MaxMistakes)
+                Add(new ComboMistake(at, ComboMistakeKind.ComboOverwritten, PaladinRules.Atonement, Name(PaladinRules.Atonement),
+                                     PaladinRules.RoyalAuthority, Name(PaladinRules.RoyalAuthority), false, StepId: step, Step: Name(step)));
+        };
         paladin.Mistake += (at, spell) =>
         {
             if (mistakes.Count < MaxMistakes)
@@ -132,10 +148,11 @@ public sealed unsafe class ComboTracker
             Add(new ComboMistake(at, ComboMistakeKind.WithoutBuff, shown, Name(shown), kept.StatusId, StatusName(kept.StatusId), false,
                                  1, at));
         };
-        darkKnight.DeliriumBroken += (at, action, step) => Add(at, ComboMistakeKind.Dropped, action, step);
+        darkKnight.DeliriumBroken += (at, action, step) => AddBroken(at, DarkKnightRules.Delirium, action, step);
         darkKnight.ShieldUnbroken += at => Add(at, ComboMistakeKind.ShieldUnbroken, DarkKnightRules.TheBlackestNight, DarkKnightRules.EdgeOfShadow);
         darkKnight.SaltUnused += at => Add(at, ComboMistakeKind.FollowUpMissed, DarkKnightRules.SaltAndDarkness, DarkKnightRules.SaltedEarth);
-        gnashingFang.Broken += (at, action, step) => Add(at, ComboMistakeKind.Dropped, action, step);
+        gnashingFang.Broken += (at, action, step) => AddBroken(at, GunbreakerRules.Continuation, action, step);
+        reign.Broken += (at, action, step) => AddBroken(at, GunbreakerRules.ReignOfBeasts, action, step);
         buffs.Expired += (at, buff, left, early) =>
         {
             if (mistakes.Count < MaxMistakes)
@@ -162,6 +179,14 @@ public sealed unsafe class ComboTracker
     /// <summary>Whether this job has combos to follow.</summary>
     public bool TracksCurrentJob => next.Count > 0 || buffs.Active || keepUp.Buff is not null;
 
+    // A side combo broken: shown as an error of the combo, not of the action that broke it.
+    private void AddBroken(double at, uint combo, uint breaker, uint step)
+    {
+        if (mistakes.Count < MaxMistakes)
+            Add(new ComboMistake(at, ComboMistakeKind.SideComboBroken, combo, Name(combo), breaker, Name(breaker), false,
+                                 StepId: step, Step: Name(step)));
+    }
+
     // A job error between two actions (the second is the expected one, or the one it is about).
     private void Add(double at, ComboMistakeKind kind, uint action, uint other)
     {
@@ -182,6 +207,7 @@ public sealed unsafe class ComboTracker
             keepUp.Reset();
             darkKnight.Reset();
             gnashingFang.Cancel();
+            reign.Cancel();
             revision++;
         }
 
@@ -241,6 +267,18 @@ public sealed unsafe class ComboTracker
                 }
 
                 paladin.Update(player.Level, charges, now);
+
+                var atonement = false;
+                var supplication = false;
+                var sepulchre = false;
+                foreach (var (id, _, _) in statuses)
+                {
+                    atonement |= id == PaladinRules.AtonementReady;
+                    supplication |= id == PaladinRules.SupplicationReady;
+                    sepulchre |= id == PaladinRules.SepulchreReady;
+                }
+
+                paladin.UpdateAtonement(atonement, supplication, sepulchre, now);
             }
         }
 
@@ -286,7 +324,10 @@ public sealed unsafe class ComboTracker
         else if (job == DarkKnightRules.JobId)
             darkKnight.OnAction(actionId, time);
         else if (job == GunbreakerRules.JobId)
+        {
             gnashingFang.OnAction(actionId, time);
+            reign.OnAction(actionId, time);
+        }
 
         if (preserves.Contains(actionId))
             return;

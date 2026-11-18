@@ -35,9 +35,9 @@ public sealed class BuffExpiry
             new(PaladinRules.DivineMightStatus, PaladinRules.HolySpirit, [PaladinRules.HolySpirit, PaladinRules.HolyCircle]),
             new(3847, PaladinRules.GoringBlade, [PaladinRules.GoringBlade]),               // Goring Blade Ready
             new(3831, PaladinRules.BladeOfHonor, [PaladinRules.BladeOfHonor]),             // Blade of Honor Ready
-            new(1902, PaladinRules.Atonement, [PaladinRules.Atonement]),                   // Atonement Ready
-            new(3827, PaladinRules.Supplication, [PaladinRules.Supplication]),             // Supplication Ready
-            new(3828, PaladinRules.Sepulchre, [PaladinRules.Sepulchre]),                   // Sepulchre Ready
+            new(PaladinRules.AtonementReady, PaladinRules.Atonement, [PaladinRules.Atonement]),                   // Atonement Ready
+            new(PaladinRules.SupplicationReady, PaladinRules.Supplication, [PaladinRules.Supplication]),             // Supplication Ready
+            new(PaladinRules.SepulchreReady, PaladinRules.Sepulchre, [PaladinRules.Sepulchre]),                   // Sepulchre Ready
             new(3019, PaladinRules.Confiteor, [PaladinRules.Confiteor]),                   // Confiteor Ready
         ],
         [WarriorJob] =
@@ -53,11 +53,11 @@ public sealed class BuffExpiry
         [
             new(3886, GunbreakerRules.SonicBreak, [GunbreakerRules.SonicBreak]),           // Ready to Break
             new(3840, GunbreakerRules.ReignOfBeasts, [GunbreakerRules.ReignOfBeasts]),     // Ready to Reign
-            new(1842, GunbreakerRules.JugularRip, [GunbreakerRules.JugularRip], AnyTime: true),    // Ready to Rip
-            new(1843, GunbreakerRules.AbdomenTear, [GunbreakerRules.AbdomenTear], AnyTime: true),  // Ready to Tear
-            new(1844, GunbreakerRules.EyeGouge, [GunbreakerRules.EyeGouge], AnyTime: true),        // Ready to Gouge
-            new(2686, GunbreakerRules.Hypervelocity, [GunbreakerRules.Hypervelocity], AnyTime: true), // Ready to Blast
-            new(3839, GunbreakerRules.FatedBrand, [GunbreakerRules.FatedBrand], AnyTime: true),    // Ready to Raze
+            new(1842, GunbreakerRules.Continuation, [GunbreakerRules.JugularRip], AnyTime: true),    // Ready to Rip
+            new(1843, GunbreakerRules.Continuation, [GunbreakerRules.AbdomenTear], AnyTime: true),  // Ready to Tear
+            new(1844, GunbreakerRules.Continuation, [GunbreakerRules.EyeGouge], AnyTime: true),        // Ready to Gouge
+            new(2686, GunbreakerRules.Continuation, [GunbreakerRules.Hypervelocity], AnyTime: true), // Ready to Blast
+            new(3839, GunbreakerRules.Continuation, [GunbreakerRules.FatedBrand], AnyTime: true),    // Ready to Raze
         ],
         [DarkKnightRules.JobId] =
         [

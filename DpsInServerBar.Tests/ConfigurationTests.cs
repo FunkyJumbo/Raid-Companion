@@ -23,7 +23,7 @@ public class ConfigurationTests
 
         Assert.True(config.Migrate());
 
-        Assert.Equal(12, config.Version);
+        Assert.Equal(13, config.Version);
         Assert.True(config.RankInRole);
         Assert.True(config.IsShown(BarElement.Rank));
         Assert.DoesNotContain(config.BarLayout, e => e.Element == BarElement.RoleGap);
@@ -73,5 +73,33 @@ public class ConfigurationTests
 
         preset.ApplyTo(config);
         Assert.True(config.RankInRole);
+    }
+
+    [Fact]
+    public void PlanColumnsAreReadAsSaved()
+    {
+        var saved = new Configuration { Version = 13 };
+        saved.MitigationPlans.Add(new Tracking.MitigationPlan { Name = "Plan", Columns = ["Tank 1 (MT)", "Scholar"] });
+        var json = Newtonsoft.Json.JsonConvert.SerializeObject(saved);
+
+        // Read twice, as at each start of the game: no column added.
+        var once = Newtonsoft.Json.JsonConvert.DeserializeObject<Configuration>(json)!;
+        var twice = Newtonsoft.Json.JsonConvert.DeserializeObject<Configuration>(Newtonsoft.Json.JsonConvert.SerializeObject(once))!;
+        Assert.Equal(["Tank 1 (MT)", "Scholar"], twice.MitigationPlans.Single().Columns);
+    }
+
+    [Fact]
+    public void ColumnsRepeatedByOlderReadsAreRemovedOnce()
+    {
+        var defaults = Tracking.MitigationPlan.DefaultColumns;
+        var config = new Configuration { Version = 12 };
+        config.MitigationPlans.Add(new Tracking.MitigationPlan { Columns = [.. defaults, .. defaults, .. defaults] });
+        config.MitigationPlans.Add(new Tracking.MitigationPlan { Columns = [.. defaults, "Tank 1 (MT)", "Scholar"] });
+
+        config.Migrate();
+
+        Assert.Equal(defaults, config.MitigationPlans[0].Columns);
+        Assert.Equal(["Tank 1 (MT)", "Scholar"], config.MitigationPlans[1].Columns);
+        Assert.Equal(13, config.Version);
     }
 }

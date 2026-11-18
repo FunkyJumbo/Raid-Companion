@@ -88,4 +88,28 @@ public class PaladinRulesTests
         rules.Update(100, 0, 1.2);
         Assert.Empty(mistakes);
     }
+
+    [Fact]
+    public void RoyalAuthorityOverAtonementComboIsCounted()
+    {
+        var rules = new PaladinRules();
+        var lost = new List<uint>();
+        rules.AtonementOverwritten += (_, step) => lost.Add(step);
+        rules.UpdateAtonement(false, true, false, 10); // Supplication ready
+        rules.UpdateAtonement(false, true, false, 11);
+        rules.OnAction(PaladinRules.RoyalAuthority, 12);
+        Assert.Equal([PaladinRules.Supplication], lost);
+    }
+
+    [Fact]
+    public void AtonementReadyGivenByThisRoyalAuthorityIsNotCounted()
+    {
+        var rules = new PaladinRules();
+        var lost = new List<uint>();
+        rules.AtonementOverwritten += (_, step) => lost.Add(step);
+        rules.UpdateAtonement(false, false, false, 10);
+        rules.UpdateAtonement(true, false, false, 12.0); // the status showed just before the action
+        rules.OnAction(PaladinRules.RoyalAuthority, 12.05);
+        Assert.Empty(lost);
+    }
 }

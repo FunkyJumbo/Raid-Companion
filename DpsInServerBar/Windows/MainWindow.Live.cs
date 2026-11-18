@@ -96,7 +96,8 @@ public sealed partial class MainWindow
     private void DrawLiveButtons()
     {
         static float ChipWidth(string label) => ImGui.CalcTextSize(label).X + Theme.Px(20);
-        var width = ChipWidth(Loc.T("Compact view")) + ImGui.GetStyle().ItemSpacing.X + ChipWidth(Loc.T("Opener practice"));
+        var width = ChipWidth(Loc.T("Compact view")) + ChipWidth(Loc.T("Opener practice")) + ChipWidth(Loc.T("Mitigation plans"))
+                    + ImGui.GetStyle().ItemSpacing.X * 2;
         if (ImGui.GetContentRegionAvail().X < width)
             ImGui.NewLine(); // no room right of the title: on their own line
         var x = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - width;
@@ -113,6 +114,12 @@ public sealed partial class MainWindow
             plugin.ToggleOpener();
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(Loc.T("Practice your job's opener: each action used in the right order is checked off."));
+
+        ImGui.SameLine();
+        if (Theme.Chip(Loc.T("Mitigation plans"), plugin.MitigationOpen))
+            plugin.ToggleMitigation();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(Loc.T("Who mitigates what for each cast of the fight. During a pull, the cast in progress and the next one are lit."));
     }
 
     /// <summary>The key figures of the fight in progress, one card each.</summary>
@@ -230,9 +237,10 @@ public sealed partial class MainWindow
         var dots = plugin.Dots.Current is { Count: > 0 } d && d[0].AvailableSeconds >= 5 ? d : null;
         var heals = role == JobRole.Healer ? plugin.Tracker.Heals.Current : null;
         var swaps = role == JobRole.Tank ? plugin.Tracker.TankSwaps.Current : null;
+        var planMisses = plugin.PlanCheck.Checks(plugin.CurrentTerritory) ? plugin.PlanCheck.Live : null;
 
         if (up is null && !gauge && positionals.Count == 0 && !showCombos && dots is null
-            && heals is not { Count: > 0 } && swaps is not { Count: > 0 })
+            && heals is not { Count: > 0 } && swaps is not { Count: > 0 } && planMisses is null)
             return;
 
         Theme.SectionHeader(Loc.T("Personal"), FontAwesomeIcon.User);
@@ -242,6 +250,8 @@ public sealed partial class MainWindow
             DrawGaugeWaste(plugin.Gauges.Current);
         DrawPositionals(positionals, names: false);
         DrawComboMistakes(combos, names: false, showNone: showCombos);
+        if (planMisses is not null)
+            DrawPlanMisses(planMisses, plugin.PlanCheck.For(plugin.CurrentTerritory).Plan?.Name ?? string.Empty);
         if (dots is not null)
             DrawDotUptime(dots);
         if (heals is not null)

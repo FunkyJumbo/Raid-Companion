@@ -104,7 +104,7 @@ During the fight, two minimalist displays keep your UI clean:
 - **Personal** — your own play, only what your job has: **GCD uptime**, **gauge overcap** (job gauge lost because it
   was too full when an action filled it), **positionals** (melee jobs, read from the bonus the game gave each hit;
   each positional action with how many landed, green until the first miss), **rotation errors** (wrong combo step, combo
-  restarted, combo timer ran out, and job errors: Paladin and Warrior buffs that ran out unused, Warrior actions used without Surging Tempest, Dark Knight Delirium combo broken, Gunbreaker Gnashing Fang combo broken or continuation lost, unbroken The Blackest Night, Paladin Holy Spirit or Holy Circle spending a Requiescat charge from level 80), **DoT uptime**, **overheal** (healers) and **tank swaps** (tanks: who had the
+  restarted, combo timer ran out, and job errors: Paladin and Warrior buffs that ran out unused, Warrior actions used without Surging Tempest, Dark Knight Delirium combo broken, Gunbreaker Gnashing Fang or Reign of Beasts combo broken or continuation lost, unbroken The Blackest Night, Paladin Royal Authority replacing an unfinished Atonement combo, Holy Spirit or Holy Circle spending a Requiescat charge from level 80), **DoT uptime**, **overheal** (healers) and **tank swaps** (tanks: who had the
   boss, and why the swap happened).
 - **Party** — every player's DPS, rDPS, damage %, crit, direct hit, crit direct hit and deaths, sortable by DPS or rDPS. Hover an rDPS
   value to see what the player gave to / received from buffs.
@@ -176,13 +176,15 @@ header and background opacity are set in Settings > Display.
 History stores your fights in a personal database on your computer. Check them whenever you like: each pull holds
 even more than Live, such as the detailed uptime, the mitigation used, a timeline of the fight, and more, and you
 can compare your damage stats between two pulls. In the settings you choose the kinds of content kept in the history
-(dungeons, trials, extremes, raids, savage, criterion, ultimates, other) and how many pulls are kept (up to 5000).
+(ultimates, savage, extremes, criterion, raids, trials, dungeons, other) and how many pulls are kept (up to 5000).
 
 <details>
 <summary><b>What's in History</b></summary>
 
 - **Pull list** — result (Kill / Wipe), boss HP left (of the phase reached in an ultimate), duration, job, DPS, rDPS, pDPS and rank. Filter by kind of content (several at
-  once) and by instance (type in the list to search a fight). Drag the grip under the list to make it taller
+  once: ultimate, savage, extreme, criterion, raids, trials, dungeons, other) and by instance. The list of instances
+  follows the same order, the latest released first in each kind; type in it to search a fight, and its filter button
+  chooses the expansions shown. Drag the grip under the list to make it taller
   (double-click to reset). Tick **vs** on another pull to **compare** it with the selected one.
 - **Cards** — your DPS and rDPS, the party DPS, the duration and the boss HP left (or Kill), each with its gap to the
   compared pull when one is ticked. In an ultimate, the duration is the time in the phase reached (also in the pull
@@ -199,8 +201,9 @@ can compare your damage stats between two pulls. In the settings you choose the 
 - **Timeline** — along the pull, one lane each for what you tick: deaths, tank swaps, failed mechanics and mitigation
   (one lane per player, by the icon of each action). Hover a mark for its detail.
 - **Casts & debuffs** — next to the timeline, a table of every cast started by the enemies and every debuff put on a
-  party member: when it was applied, on whom, by whom, when it ran out and how long it lasted. Filter casts or debuffs,
-  or search an action, a debuff or a player.
+  party member: when it was applied, on whom, by whom, when it ran out and how long it lasted. The enemies' attacks with
+  no cast bar that hurt the party (an instant raidwide, adds fed to the boss...) are in it too, marked *instant*;
+  auto-attacks are left out. Filter casts or debuffs, or search an action, a debuff or a player.
 - Also the uptime graph, the party deaths with their cause and the failed mechanics, as in Live.
 
 </details>
@@ -290,6 +293,44 @@ ultimate these lines replace the pull summary.
 
 <br>
 
+## Mitigation plans
+
+Who uses which mitigation on each cast of a fight, as raid groups keep it in a spreadsheet: one row per cast, one
+column per role (MT, OT, H1, H2, M1, M2, R1, R2, or jobs), the skills of each cell shown by their icon (up to three
+side by side, centered). Open it with **Mitigation plans** in Live: the list of the plans of every fight, by name, with a
+search (a fight searched shows all its plans). **Show** opens a plan in its own window, **Edit** opens it in the editor.
+
+- **Make one from a pull**: in History, **New mitigation plan** next to the timeline of a pull. The casts of the pull
+  are listed on the right (the instant attacks too): click one to add it as a row, at its time.
+- **Pick the skills**: click a cell to see the skills of its column's role (role actions, then each job: tank skills
+  for MT and OT, healer skills for H1 and H2, every DPS skill for the DPS spots, as a ranged may stand in a melee spot),
+  and tick as many as needed. A cell can also hold a note, shown on hover of the "?" next to its skills.
+- **Jobs of your group**: click the name of a column to choose the job played there: its icon shows next to the name,
+  and the cells of the column show and offer its skills only (the others stay in the plan, for other groups); your mitigations are checked on them only, or on the skills of the job you play when no job is chosen. This choice stays with you: a shared plan carries no job, each
+  group picks its own.
+- **Pre-pull**: **Add a pre-pull row** gives a row for the skills used before the pull, with when they are used (8 s
+  before the pull...), set left of the cells. One row per time: an imported pre-pull ("Kera -8s", "Benison -5s") is
+  split by time.
+- **Import one from a spreadsheet**: select the cells of the plan (the header row naming the roles, the casts and what
+  each role uses), copy them, then click the paste button and pick the fight. The skills named in the cells become
+  icons, short names included (Soil, Kera, CU, TBN...); what is not a skill stays as a note. Lines like
+  `P1: Living Liquid` start a part of the fight; a line of text alone is kept as a note of the cast above it. Rows named
+  like a cast of the fight are linked to it right away.
+- **Share**: one player makes the plan and copies its code (share button); the others copy the code and click the
+  paste button.
+- **Edit**: the pen opens the editor: name, columns, part, cast, rows moved or removed, and the **timeline cast** of
+  each row (which cast, and which use of it in the pull).
+- **During a pull** of the plan's fight, the plan follows the casts as the enemies start them: the cast in progress is
+  lit in green, the next one in gold, and the table scrolls to it. Only the rows linked to a cast of the timeline can be
+  followed.
+- **Your mitigations**: choose **My column** (your role in the plan) and tick **Check my mitigations** (one plan per
+  fight). In that fight, **Personal** (Live, then the pull in History) shows each skill of your column not used in
+  time: between 15 s before its cast landed and 1 s after; in the pre-pull, around its time. The History timeline can show them too
+  (**Plan misses**, one icon per skill missed, at the time its cast landed).
+- Plans are kept per fight (several per fight), in the plugin's settings.
+
+<br>
+
 ## Opener practice
 
 <p align="center">
@@ -376,7 +417,7 @@ macros keep working.
 | **DPS in server bar** | Presets (renamable, switchable with `/raidcompanion preset N`), metric, number format (`12345` / `12,345` / `12.3k`), bar elements and their order, separator, **bar preview** (placeholder values for 10 s), auto-hide, colors |
 | **Chat summary** | Pull summary on/off, in dungeons, at the end of each ultimate phase, each party death as it happens (optionally with the overkill), values shown, comparison with your best kill, **preview in chat** |
 | **Appearance** | Theme presets, saved custom themes (renamable), background opacity, custom colors, preview |
-| **Pulls history** | Record only in duties, **kinds of content recorded** (dungeons, trials, extremes, raids, savage, criterion, ultimates, other), minimum pull length, history size, tankbuster vulnerabilities ignored |
+| **Pulls history** | Record only in duties, **kinds of content recorded** (ultimates, savage, extremes, criterion, raids, trials, dungeons, other), minimum pull length, history size, tankbuster vulnerabilities ignored |
 | **DPS check** (WIP) | Boss HP, enrage time and minimum party DPS per fight; ultimate phases with each phase's HP, enrage and required DPS; other zones / encounters |
 
 </details>

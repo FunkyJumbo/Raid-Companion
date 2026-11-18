@@ -220,7 +220,7 @@ public sealed class BarPreset
 [Serializable]
 public sealed class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 12;
+    public int Version { get; set; } = 13;
 
     /// <summary>Order and visibility of the elements of the server bar text.</summary>
     [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
@@ -257,6 +257,12 @@ public sealed class Configuration : IPluginConfiguration
     public bool TimelineMistakes { get; set; } = true;
 
     public bool TimelineMitigation { get; set; } = true;
+
+    /// <summary>Expansions left out of the list of fights in History and Progression (expansion ids).</summary>
+    public HashSet<uint> HiddenExpansions { get; set; } = [];
+
+    /// <summary>History timeline: the skills of your column of the mitigation plan not used in time.</summary>
+    public bool TimelinePlanMisses { get; set; } = true;
 
     /// <summary>Kinds of content shown in the History tab (several can be selected).</summary>
     public ContentCategory HistoryCategories { get; set; } = ContentCategory.All;
@@ -318,6 +324,28 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>Openers made in the opener editor (new, copied or imported).</summary>
     [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
     public List<Opener.CustomOpener> CustomOpeners { get; set; } = [];
+
+    /// <summary>Mitigation plans, for every fight.</summary>
+    [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+    public List<Tracking.MitigationPlan> MitigationPlans { get; set; } = [];
+
+    /// <summary>Mitigation plan shown for each fight (territory id to plan id).</summary>
+    public Dictionary<uint, string> MitigationPlanSelected { get; set; } = new();
+
+    /// <summary>Mitigation plan your mitigations are checked against, for each fight (territory id to plan id).</summary>
+    public Dictionary<uint, string> MitigationActive { get; set; } = new();
+
+    /// <summary>Your column in each mitigation plan (plan id to column index).</summary>
+    public Dictionary<string, int> MitigationMyColumn { get; set; } = new();
+
+    /// <summary>Name of the column you last chose (MT, H1...): your column in plans where you chose none.</summary>
+    public string MitigationMySlot { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Job played in each column of a mitigation plan, chosen by this group ("planId:column" to the job abbreviation).
+    /// Kept out of the plan: a shared plan carries no job, each group picks its own.
+    /// </summary>
+    public Dictionary<string, string> MitigationColumnJobs { get; set; } = new();
 
     /// <summary>Columns of the compact meter shown after the player and the DPS / rDPS.</summary>
     public CompactColumn CompactColumns { get; set; } = CompactColumn.Share | CompactColumn.Deaths;
@@ -575,6 +603,16 @@ public sealed class Configuration : IPluginConfiguration
             foreach (var preset in BarPresets)
                 preset.Layout.RemoveAll(e => RemovedElements.Contains(e.Element));
             Version = 12;
+            changed = true;
+        }
+
+        // Mitigation plans read before the fix of their columns: the default columns were added in front at each read.
+        // Once: from then on the columns are replaced when read.
+        if (Version < 13)
+        {
+            foreach (var plan in MitigationPlans)
+                plan.RemoveRepeatedDefaultColumns();
+            Version = 13;
             changed = true;
         }
 

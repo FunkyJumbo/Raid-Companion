@@ -141,6 +141,8 @@ public sealed class PullTracker : IDisposable
             GaugeWaste = plugin.Gauges.Current.ToList(),
             Positionals = plugin.Positionals.Current.ToList(),
             ComboMistakes = plugin.Combos.Current.ToList(),
+            PlanMisses = plugin.PlanCheck.Final(pull.TerritoryId, pull.StartUtc),
+            PlanName = plugin.PlanCheck.For(pull.TerritoryId).Plan?.Name ?? string.Empty,
             DotUptimes = plugin.Dots.Current.ToList(),
             TankSwaps = plugin.Tracker.TankSwaps.Current.ToList(),
             Overheal = plugin.Tracker.Heals.Current.ToList(),

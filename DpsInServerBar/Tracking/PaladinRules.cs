@@ -6,7 +6,9 @@ namespace DpsInServerBar.Tracking;
 /// Paladin errors beyond the 1-2-3 combos. From level 80, the Requiescat charges go to Confiteor and its combo:
 /// a Holy Spirit or Holy Circle that spends one is an error. Under Divine Might they spend Divine Might first, so they are fine.
 /// Which buff one of them spent is read from the statuses (the one that loses a charge just around the action),
-/// so the order in which the game reports the action and the status change does not matter. Pure logic, no game access.
+/// so the order in which the game reports the action and the status change does not matter.
+/// Also: Royal Authority used while a step of the Atonement combo (Atonement, Supplication, Sepulchre) was still to
+/// use gives Atonement Ready again, and the rest of the combo is lost. Pure logic, no game access.
 /// </summary>
 public sealed class PaladinRules
 {
@@ -14,6 +16,8 @@ public sealed class PaladinRules
     public const uint HolySpirit = 7384;
     public const uint HolyCircle = 16458;
     public const uint Requiescat = 7383;
+    public const uint RoyalAuthority = 3539;
+    public const ushort AtonementReady = 1902, SupplicationReady = 3827, SepulchreReady = 3828;
     public const uint GoringBlade = 3538;
     public const uint Atonement = 16460;
     public const uint Supplication = 36918;
@@ -36,8 +40,22 @@ public sealed class PaladinRules
     private double? spellAt;
     private uint spell;
 
+    // Since when each step of the Atonement combo is ready (null: not ready).
+    private double? atonementSince, supplicationSince, sepulchreSince;
+
     /// <summary>Raised with the time and action of a Holy Spirit or Holy Circle that spent a Requiescat charge.</summary>
     public event Action<double, uint>? Mistake;
+
+    /// <summary>Raised when Royal Authority replaced the Atonement combo: time, and the step that was still to use.</summary>
+    public event Action<double, uint>? AtonementOverwritten;
+
+    /// <summary>Every frame: the steps of the Atonement combo ready on you.</summary>
+    public void UpdateAtonement(bool atonement, bool supplication, bool sepulchre, double now)
+    {
+        atonementSince = atonement ? atonementSince ?? now : null;
+        supplicationSince = supplication ? supplicationSince ?? now : null;
+        sepulchreSince = sepulchre ? sepulchreSince ?? now : null;
+    }
 
     /// <summary>Every frame: the player's level, Requiescat charges (0 without it) and the combat time.</summary>
     public void Update(int playerLevel, int requiescatCharges, double now)
@@ -66,6 +84,16 @@ public sealed class PaladinRules
     /// <summary>One of your actions landed.</summary>
     public void OnAction(uint actionId, double now)
     {
+        // A step ready since before this Royal Authority (not the one it gives, which may show first) was lost.
+        if (actionId == RoyalAuthority)
+        {
+            var step = ReadyBefore(atonementSince, now) ? Atonement
+                     : ReadyBefore(supplicationSince, now) ? Supplication
+                     : ReadyBefore(sepulchreSince, now) ? Sepulchre : 0u;
+            if (step != 0)
+                AtonementOverwritten?.Invoke(now, step);
+        }
+
         if (actionId is HolySpirit or HolyCircle && level >= ConfiteorLevel)
         {
             spellAt = now;
@@ -73,9 +101,12 @@ public sealed class PaladinRules
         }
     }
 
+    private static bool ReadyBefore(double? since, double now) => since is { } s && now - s > Window;
+
     /// <summary>A new fight.</summary>
     public void Reset()
     {
+        atonementSince = supplicationSince = sepulchreSince = null;
         spellAt = null;
         requiescatSpentAt = double.NegativeInfinity;
     }

@@ -3,6 +3,13 @@
 <!-- One "## <version>" section per release. The Release workflow publishes the section of the tagged
      version as the GitHub release notes; the same notes go into pluginmaster.json (shown in Dalamud). -->
 
+## 1.0.7.0
+
+- Mitigation plans (Mitigation plans in Live): the skills each role uses on each cast of a fight, and before the pull, picked by their icon. Made from the casts of a pull in History, imported from a spreadsheet or shared with a code. Followed during the pull, and with your role chosen, the skills you missed show in Personal and on the History timeline.
+- History and Progression: the kinds of content go from the hardest (ultimate) to the easiest, and the fights of the list follow them, the latest first; a filter button by the search chooses the expansions shown.
+- Casts & debuffs: the enemies' attacks with no cast bar that hurt the party are recorded too (instant raidwides, adds fed to the boss...).
+- Rotation errors: Paladin Atonement combo started over too early, Gunbreaker Reign of Beasts combo broken; a broken combo or a lost continuation shows as an error of the combo, not of the action that broke it.
+
 ## 1.0.6.0
 
 - Combo errors are now rotation errors, with errors of their own for Paladin, Warrior, Dark Knight and Gunbreaker: buffs that ran out unused, actions used without Surging Tempest or Darkside, Delirium and Gnashing Fang combos broken, lost continuations, a wasted The Blackest Night, and more (hover the "?" for the list).

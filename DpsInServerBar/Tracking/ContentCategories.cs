@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Dalamud.Game;
 using Dalamud.Plugin.Services;
 using Lumina.Excel.Sheets;
@@ -39,22 +40,50 @@ public sealed class ContentCategories
     private const uint VariantAndCriterionDungeons = 30;
     private const uint ChaoticAllianceRaid = 37;
 
+    /// <summary>The kinds of content, hardest first: the order of the filters and of the fights in the lists.</summary>
     public static (ContentCategory Category, string Label)[] Labels =>
     [
-        (ContentCategory.Dungeon, Loc.T("Dungeons")),
-        (ContentCategory.Trial, Loc.T("Trials")),
-        (ContentCategory.Extreme, Loc.T("Extreme")),
-        (ContentCategory.Raid, Loc.T("Raids")),
-        (ContentCategory.Savage, Loc.T("Savage")),
-        (ContentCategory.Criterion, Loc.T("Criterion")),
         (ContentCategory.Ultimate, Loc.T("Ultimate")),
+        (ContentCategory.Savage, Loc.T("Savage")),
+        (ContentCategory.Extreme, Loc.T("Extreme")),
+        (ContentCategory.Criterion, Loc.T("Criterion")),
+        (ContentCategory.Raid, Loc.T("Raids")),
+        (ContentCategory.Trial, Loc.T("Trials")),
+        (ContentCategory.Dungeon, Loc.T("Dungeons")),
         (ContentCategory.Other, Loc.T("Other")),
     ];
+
+    /// <summary>Position of a kind of content in <see cref="Labels"/>.</summary>
+    public static int Order(ContentCategory category) => Array.FindIndex(Labels, l => l.Category == category) is var i and >= 0 ? i : Labels.Length;
 
     private readonly IDataManager dataManager;
     private readonly Dictionary<uint, ContentCategory> cache = new();
 
+    private readonly Dictionary<uint, (uint Expansion, uint Release)> releases = new();
+
     public ContentCategories(IDataManager dataManager) => this.dataManager = dataManager;
+
+    /// <summary>
+    /// The expansion of a territory (0: A Realm Reborn ... 5: Dawntrail) and its place among the duties of the game
+    /// (higher: released later): its expansion, then its duty's order in the Duty Finder.
+    /// </summary>
+    public (uint Expansion, uint Release) ReleaseOf(uint territory)
+    {
+        if (!releases.TryGetValue(territory, out var release))
+        {
+            release = dataManager.GetExcelSheet<TerritoryType>().TryGetRow(territory, out var row)
+                          ? (row.ExVersion.RowId,
+                             row.ContentFinderCondition.ValueNullable is { } duty ? (uint)duty.SortKey : territory)
+                          : (0u, territory);
+            releases[territory] = release;
+        }
+
+        return release;
+    }
+
+    /// <summary>The expansions, by id, with their name in the client's language.</summary>
+    public IReadOnlyList<(uint Id, string Name)> Expansions() =>
+        dataManager.GetExcelSheet<ExVersion>().Select(e => (e.RowId, e.Name.ExtractText())).Where(e => e.Item2.Length > 0).ToList();
 
     public ContentCategory Of(uint territory)
     {

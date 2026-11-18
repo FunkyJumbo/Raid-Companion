@@ -45,6 +45,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly CompactWindow compactWindow;
     private readonly OpenerWindow openerWindow;
     private readonly OpenerEditorWindow openerEditorWindow;
+    private readonly MitigationWindow mitigationWindow;
     private readonly UI.AlBhedChat alBhedChat;
     private readonly UI.AlBhedSender alBhedSender;
     private readonly OpenerCompactWindow openerCompactWindow;
@@ -83,7 +84,10 @@ public sealed class Plugin : IDalamudPlugin
         native.LocalActionUsed += Uptime.OnActionUsed;
         Combos = new ComboTracker(ObjectTable, JobGauges, combat, DataManager);
         native.LocalActionUsed += Combos.OnActionUsed;
+        PlanCheck = new PlanCheck(this);
+        native.LocalActionUsed += PlanCheck.OnActionUsed;
         native.LocalDamage += Combos.OnDamage;
+        native.EnemyHit += FightLog.OnEnemyHit;
         Positionals = new PositionalTracker(ObjectTable, combat, DataManager, Log);
         native.LocalDamage += Positionals.OnHit;
         Dots = new DotTracker(ObjectTable, combat, DataManager, () => Uptime.EnemyTargetable, () => Boss.Current?.EntityId ?? 0);
@@ -102,6 +106,10 @@ public sealed class Plugin : IDalamudPlugin
         windowSystem.AddWindow(compactWindow);
         windowSystem.AddWindow(openerWindow);
         windowSystem.AddWindow(openerEditorWindow);
+        var mitigationPlanWindow = new MitigationPlanWindow(this);
+        mitigationWindow = new MitigationWindow(this, mitigationPlanWindow);
+        windowSystem.AddWindow(mitigationWindow);
+        windowSystem.AddWindow(mitigationPlanWindow);
         windowSystem.AddWindow(openerCompactWindow);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
@@ -139,6 +147,7 @@ public sealed class Plugin : IDalamudPlugin
     public PositionalTracker Positionals { get; }
     public DotTracker Dots { get; }
     public ComboTracker Combos { get; }
+    public PlanCheck PlanCheck { get; }
     public ContentCategories ContentCategories { get; }
     public FightCatalog Fights { get; }
     public OpenerTracker OpenerTracker { get; }
@@ -260,6 +269,19 @@ public sealed class Plugin : IDalamudPlugin
 
     /// <summary>Opens the main window on a pull in History (chat summary link).</summary>
     public void ShowPull(Guid pullId) => mainWindow.ShowPull(pullId);
+
+    public bool MitigationOpen => mitigationWindow.IsOpen;
+
+    public void ToggleMitigation()
+    {
+        if (mitigationWindow.IsOpen)
+            mitigationWindow.IsOpen = false;
+        else
+            mitigationWindow.Show();
+    }
+
+    /// <summary>A new mitigation plan for the fight of this pull, made from its casts.</summary>
+    public void NewMitigationPlan(Tracking.PullRecord pull) => mitigationWindow.NewFromPull(pull);
 
     /// <summary>Opens the main window from the compact meter (which stays open).</summary>
     public void ShowMainWindow(bool history = false)

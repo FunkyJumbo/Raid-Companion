@@ -158,6 +158,40 @@ public sealed partial class MainWindow
             Set(all ? ContentCategory.None : offered);
     }
 
+    /// <summary>A button by the search of the fights: the expansions to show in the list, to tick.</summary>
+    private void DrawExpansionFilter(IReadOnlyList<PullRecord> pulls)
+    {
+        var config = plugin.Configuration;
+        var filtered = config.HiddenExpansions.Count > 0;
+        if (Theme.IconButton("expansions", FontAwesomeIcon.Filter, Loc.T("Expansions shown"), filtered ? Theme.Gold : null))
+            ImGui.OpenPopup("##expansions");
+
+        using var popup = ImRaii.Popup("##expansions");
+        if (!popup)
+            return;
+
+        ImGui.TextColored(Theme.TextMuted, Loc.T("Expansions shown"));
+        var counts = pulls.GroupBy(p => plugin.ContentCategories.ReleaseOf(p.TerritoryId).Expansion).ToDictionary(g => g.Key, g => g.Count());
+        foreach (var (id, name) in plugin.ContentCategories.Expansions().Reverse())
+        {
+            var shown = !config.HiddenExpansions.Contains(id);
+            if (ImGui.Checkbox($"{name} ({counts.GetValueOrDefault(id)})##ex{id}", ref shown))
+            {
+                if (shown)
+                    config.HiddenExpansions.Remove(id);
+                else
+                    config.HiddenExpansions.Add(id);
+                config.Save();
+            }
+        }
+
+        if (filtered && ImGui.Button(Loc.T("Show them all")))
+        {
+            config.HiddenExpansions.Clear();
+            config.Save();
+        }
+    }
+
     private void DrawHistoryFilter(IReadOnlyList<PullRecord> pulls)
     {
         // The fights go by their instance (with the fight's name when the instance has two, e.g. a door boss); an
@@ -177,7 +211,19 @@ public sealed partial class MainWindow
             return zoneOf.Values.Count(z => z.Equals(zoneOf[title], StringComparison.OrdinalIgnoreCase)) > 1 ? $"{zone} ({title})" : zone;
         }
 
-        var titles = zoneOf.Keys.OrderBy(Label).ToList();
+        // By kind of content (hardest first, as the filters), the latest released first, in the expansions shown.
+        var config = plugin.Configuration;
+        var territoryOf = pulls.Where(p => Progression.Encounter(p).Length > 0)
+                               .GroupBy(Progression.Encounter, StringComparer.OrdinalIgnoreCase)
+                               .ToDictionary(g => g.Key, g => g.First().TerritoryId, StringComparer.OrdinalIgnoreCase);
+        var titles = zoneOf.Keys
+                           .Select(t => (Title: t, Territory: territoryOf[t], Category: plugin.ContentCategories.Of(territoryOf[t]),
+                                         Release: plugin.ContentCategories.ReleaseOf(territoryOf[t])))
+                           .Where(t => !config.HiddenExpansions.Contains(t.Release.Expansion))
+                           .OrderBy(t => ContentCategories.Order(t.Category))
+                           .ThenByDescending(t => t.Release.Expansion).ThenByDescending(t => t.Release.Release)
+                           .ThenBy(t => Label(t.Title))
+                           .ToList();
 
         ImGui.SetNextItemWidth(Theme.Px(260));
         using (var combo = ImRaii.Combo(Loc.T("Instance"), historyFilter.Length == 0 ? Loc.T("All") : Label(historyFilter),
@@ -192,19 +238,34 @@ public sealed partial class MainWindow
                     ImGui.SetKeyboardFocusHere();
                 }
 
-                ImGui.SetNextItemWidth(-1);
+                // A fixed width: the list sizes itself to its content, a width taken from it would grow it at each frame.
+                ImGui.SetNextItemWidth(Theme.Px(260) - ImGui.GetFrameHeight() - ImGui.GetStyle().ItemSpacing.X);
                 ImGui.InputTextWithHint("##encountersearch", Loc.T("Search a fight"), ref encounterSearch, 64);
+                ImGui.SameLine();
+                DrawExpansionFilter(pulls);
 
                 if (encounterSearch.Length == 0 && ImGui.Selectable(Loc.T("All"), historyFilter.Length == 0))
                     historyFilter = string.Empty;
-                foreach (var title in titles)
+                var category = ContentCategory.None;
+                foreach (var (title, _, kind, _) in titles)
                 {
                     if (encounterSearch.Length > 0 && !Label(title).Contains(encounterSearch, StringComparison.OrdinalIgnoreCase)
                         && !title.Contains(encounterSearch, StringComparison.OrdinalIgnoreCase))
                         continue;
-                    if (ImGui.Selectable(Label(title), title.Equals(historyFilter, StringComparison.OrdinalIgnoreCase)))
+
+                    // A title above the fights of each kind of content.
+                    if (kind != category)
+                    {
+                        category = kind;
+                        ImGui.TextColored(Theme.Gold, $"— {ContentCategories.Labels.FirstOrDefault(l => l.Category == kind).Label ?? Loc.T("Other")} —");
+                    }
+
+                    if (ImGui.Selectable($"  {Label(title)}##{title}", title.Equals(historyFilter, StringComparison.OrdinalIgnoreCase)))
                         historyFilter = title;
                 }
+
+                if (titles.Count == 0 && zoneOf.Count > 0)
+                    ImGui.TextDisabled(Loc.T("No fight in the expansions shown."));
             }
         }
 

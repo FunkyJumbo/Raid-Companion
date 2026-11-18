@@ -136,6 +136,9 @@ public sealed unsafe class NativeCombatTracker : IDisposable
     /// <summary>One of your own actions landed (action id), raised from the game thread.</summary>
     public event Action<uint>? LocalActionUsed;
 
+    /// <summary>An enemy action damaged party members (caster name, action id), raised once per action, from the game thread.</summary>
+    public event Action<string, uint>? EnemyHit;
+
     /// <summary>One of your own actions damaged an enemy: action id, potency bonus in percent (combo, positional), target.</summary>
     public event Action<uint, byte, uint>? LocalDamage;
 
@@ -364,6 +367,7 @@ public sealed unsafe class NativeCombatTracker : IDisposable
         uint casterEntityId, ActionEffectHandler.Header* header, ActionEffectHandler.TargetEffects* effects,
         GameObjectId* targetEntityIds)
     {
+        var hitParty = false;
         for (var t = 0; t < header->NumTargets; t++)
         {
             if (partyDeaths.For(targetEntityIds[t].ObjectId) is not { } recorder)
@@ -377,8 +381,15 @@ public sealed unsafe class NativeCombatTracker : IDisposable
             }
 
             if (amount > 0)
+            {
                 recorder.OnHitTaken(header->ActionType, header->ActionId, NameOf(casterEntityId), amount);
+                hitParty = true;
+            }
         }
+
+        // An enemy's action (not a party member's, nor a pet's) that hurt the party: the fight log keeps the ones with no cast bar.
+        if (hitParty && header->ActionType == 1 && EnemyHit is not null && ResolvePartyOwner(casterEntityId) == 0)
+            EnemyHit(NameOf(casterEntityId), header->ActionId);
     }
 
     private void RecordDamageOrDeathOfParty(uint entityId, uint category, uint arg1, uint arg2, uint arg3, uint arg4)

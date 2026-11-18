@@ -54,6 +54,12 @@ public sealed class PullRecord
     /// <summary>Your combo errors, oldest first.</summary>
     public List<ComboMistake> ComboMistakes { get; set; } = [];
 
+    /// <summary>Skills of your column of the mitigation plan not used in time; null when no plan checked you.</summary>
+    public List<PlanMiss>? PlanMisses { get; set; }
+
+    /// <summary>The mitigation plan you were checked against.</summary>
+    public string PlanName { get; set; } = string.Empty;
+
     /// <summary>Uptime of each of your DoTs on the boss.</summary>
     public List<DotUptime> DotUptimes { get; set; } = [];
 

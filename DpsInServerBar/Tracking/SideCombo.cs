@@ -5,7 +5,8 @@ namespace DpsInServerBar.Tracking;
 /// <summary>
 /// A combo the game keeps apart from the basic 1-2-3 (its steps do not break the basic one, and are not in the
 /// combo data the main tracker reads), and that some actions break before it is finished: Dark Knight Delirium
-/// (Scarlet Delirium, Comeuppance, Torcleaver), Gunbreaker Gnashing Fang (Gnashing Fang, Savage Claw, Wicked Talon).
+/// (Scarlet Delirium, Comeuppance, Torcleaver), Gunbreaker Gnashing Fang (Gnashing Fang, Savage Claw, Wicked Talon) and
+/// Reign of Beasts (Reign of Beasts, Noble Blood, Lion Heart).
 /// Pure logic, no game access.
 /// </summary>
 public sealed class SideCombo

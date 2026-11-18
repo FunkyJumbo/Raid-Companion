@@ -41,7 +41,7 @@ public sealed partial class MainWindow
         if (fightLogCasts)
         {
             rows.AddRange(pull.BossCasts.Where(c => Match(GameNames.Action(c.ActionId, c.Action), c.Caster))
-                              .Select(c => (c.AtSeconds, true, GameNames.Action(c.ActionId, c.Action), string.Empty, string.Empty, c.Caster,
+                              .Select(c => (c.AtSeconds, true, CastName(c), string.Empty, string.Empty, c.Caster,
                                             c.CastSeconds > 0 ? c.AtSeconds + c.CastSeconds : (double?)null,
                                             c.CastSeconds > 0 ? c.CastSeconds : (double?)null)));
         }
@@ -120,6 +120,10 @@ public sealed partial class MainWindow
     /// The pull as lanes, chosen with the boxes above it: deaths (red), tank swaps (blue), failed mechanics (orange) and
     /// mitigation (one lane per player, by the icon of each action). Minute ticks; hover a mark for its detail.
     /// </summary>
+    // A cast by its name; an attack with no cast bar marked as instant.
+    private static string CastName(BossCast cast) =>
+        cast.CastSeconds > 0 ? GameNames.Action(cast.ActionId, cast.Action) : Loc.F("{0} (instant)", GameNames.Action(cast.ActionId, cast.Action));
+
     private void DrawTimeline(PullRecord pull)
     {
         var config = plugin.Configuration;
@@ -143,12 +147,32 @@ public sealed partial class MainWindow
         config.TimelineTankSwaps = Toggle(Loc.F("Tank swaps ({0})",pull.TankSwaps.Count), config.TimelineTankSwaps, Theme.Tank);
         config.TimelineMistakes = Toggle(Loc.F("Failed mechanics ({0})",pull.Mistakes.Count), config.TimelineMistakes, Theme.Warn);
         config.TimelineMitigation = Toggle(Loc.F("Mitigation ({0})",pull.Mitigations.Count), config.TimelineMitigation, Theme.Crystal);
+        if (pull.PlanMisses is { } planMisses)
+        {
+            config.TimelinePlanMisses = Toggle(Loc.F("Plan misses ({0})", planMisses.Count), config.TimelinePlanMisses, Theme.Bad);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(Loc.F("The skills of your column of the mitigation plan ({0}) not used in time, at the time their cast landed.", pull.PlanName));
+        }
 
-        // On the right: the table of the enemy casts and party debuffs, below the timeline.
+        // On the right: a mitigation plan from the casts, and the table of the enemy casts and party debuffs.
+        var planLabel = Loc.T("New mitigation plan");
+        var logLabel = Loc.T("Casts & debuffs");
+        var right = ImGui.GetWindowContentRegionMax().X;
+        if (pull.BossCasts.Count > 0)
+        {
+            var planX = right - ImGui.CalcTextSize(planLabel).X - Theme.Px(20)
+                        - (ImGui.CalcTextSize(logLabel).X + Theme.Px(20) + ImGui.GetStyle().ItemSpacing.X);
+            ImGui.SameLine(planX);
+            if (Theme.Chip(planLabel, false))
+                plugin.NewMitigationPlan(pull);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(Loc.T("A mitigation plan for this fight, made from the casts of this pull: pick the casts, then write which role uses which mitigation."));
+        }
+
         if (pull.BossCasts.Count > 0 || pull.Debuffs.Count > 0)
         {
-            var label = Loc.T("Casts & debuffs");
-            ImGui.SameLine(ImGui.GetWindowContentRegionMax().X - ImGui.CalcTextSize(label).X - Theme.Px(20));
+            var label = logLabel;
+            ImGui.SameLine(right - ImGui.CalcTextSize(label).X - Theme.Px(20));
             if (Theme.Chip(label, showFightLog))
                 showFightLog = !showFightLog;
             if (ImGui.IsItemHovered())
@@ -178,6 +202,13 @@ public sealed partial class MainWindow
         {
             lanes.Add(new TimelineLane(FontAwesomeIcon.ExclamationTriangle, null, dotLane, Theme.Warn, TimelineMark.Dot,
                                        pull.Mistakes.Select(m => (m.AtSeconds, 0u, $"{Names.Show(m.Player)}: {MistakeText(m)}")).ToList()));
+        }
+
+        if (config.TimelinePlanMisses && pull.PlanMisses is { Count: > 0 } misses)
+        {
+            lanes.Add(new TimelineLane(FontAwesomeIcon.ClipboardList, null, iconLane, Theme.Bad, TimelineMark.Icon,
+                                       misses.Select(m => (Math.Max(0, m.AtSeconds), ActionIcons.OfAction(m.ActionId),
+                                                           Loc.F("Plan: {0} not used for {1}", GameNames.Action(m.ActionId, m.Action), m.Cast))).ToList()));
         }
 
         if (config.TimelineMitigation)

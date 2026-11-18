@@ -16,6 +16,7 @@ namespace DpsInServerBar.Tracking;
 public sealed class DarkKnightRules
 {
     public const uint JobId = 32;
+    public const uint Delirium = 7390;
     public const uint ScarletDelirium = 36928, Comeuppance = 36929, Torcleaver = 36930;
     public const uint TheBlackestNight = 7393, EdgeOfShadow = 16470;
     public const uint SaltedEarth = 3639, SaltAndDarkness = 25755;

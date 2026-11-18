@@ -11,7 +11,7 @@ namespace DpsInServerBar.Tracking;
 
 /// <summary>A cast started by an enemy. <see cref="AtSeconds"/> counts from the start of the pull.</summary>
 /// <param name="Caster">Name of the enemy casting, empty for the nameless helpers that cast many mechanics.</param>
-/// <param name="CastSeconds">Cast time, 0 when unknown.</param>
+/// <param name="CastSeconds">Cast time; 0 for an attack with no cast bar (an instant hit on the party).</param>
 public sealed record BossCast(double AtSeconds, string Caster, uint ActionId, string Action, float CastSeconds);
 
 /// <summary>A debuff on a party member, from when it was applied until it ran out (or was cleansed).</summary>
@@ -179,6 +179,51 @@ public sealed class FightLog
         }
 
         return info.Name.Length > 0 ? info : null;
+    }
+
+    // An attack with no cast bar this close after a cast of the same name is that cast landing, not a new attack.
+    private const double SameAttackSeconds = 4;
+
+    /// <summary>
+    /// An enemy action hurt the party (from the action effect hook). Kept as an instant attack when no cast bar showed it:
+    /// adds being fed to the boss, instant raidwides... Auto-attacks are left out, and repeats of one attack within 3 s
+    /// (several adds, several hits) count once.
+    /// </summary>
+    public void OnEnemyHit(string caster, uint actionId)
+    {
+        if (!combat.InCombat || casts.Count >= MaxCasts || IsAutoAttack(actionId) || ActionName(actionId) is not { Length: > 0 } name)
+            return;
+
+        var now = DateTime.UtcNow;
+        for (var i = casts.Count - 1; i >= 0; i--)
+        {
+            var c = casts[i];
+            if ((now - c.At).TotalSeconds > 60)
+                break;
+            var sameAttack = c.ActionId == actionId || c.Action == name;
+            if (!sameAttack)
+                continue;
+            if (c.CastSeconds > 0 && (now - c.At).TotalSeconds <= c.CastSeconds + SameAttackSeconds)
+                return; // the cast landing
+            if (c.CastSeconds == 0 && (now - c.At).TotalSeconds <= 3)
+                return; // the same instant attack
+        }
+
+        casts.Add((now, caster, actionId, name, 0f));
+    }
+
+    private readonly Dictionary<uint, bool> autoAttacks = new();
+
+    // Auto-attacks (action category 1) are not attacks of the fight's script.
+    private bool IsAutoAttack(uint action)
+    {
+        if (!autoAttacks.TryGetValue(action, out var auto))
+        {
+            auto = !dataManager.GetExcelSheet<Lumina.Excel.Sheets.Action>().TryGetRow(action, out var row) || row.ActionCategory.RowId == 1;
+            autoAttacks[action] = auto;
+        }
+
+        return auto;
     }
 
     // Names in the client's language, like the game shows them.

@@ -167,7 +167,7 @@ public sealed partial class MainWindow
         var heals = role == JobRole.Healer ? pull.Overheal.Where(h => JobRoles.Of(h.Job) == JobRole.Healer).ToList() : [];
         var losses = DamageDownLoss.Of(pull);
         var tank = role == JobRole.Tank;
-        if (pull.Uptime is null && !gauge && pull.Positionals.Count == 0 && pull.ComboMistakes.Count == 0 && dots is null
+        if (pull.Uptime is null && !gauge && pull.Positionals.Count == 0 && pull.ComboMistakes.Count == 0 && pull.PlanMisses is null && dots is null
             && heals.Count == 0 && !(tank && pull.TankSwaps.Count > 0) && pull.Mitigations.Count == 0 && losses.Count == 0)
             return;
 
@@ -182,6 +182,8 @@ public sealed partial class MainWindow
             FoldPositionals(pull.Positionals);
         if (pull.ComboMistakes.Count > 0)
             FoldCombos(pull.ComboMistakes);
+        if (pull.PlanMisses is { } planMisses)
+            FoldPlanMisses(planMisses, pull.PlanName);
         if (dots is not null)
             FoldDots(dots);
         if (heals.Count > 0)
@@ -457,6 +459,78 @@ public sealed partial class MainWindow
         }
 
         ImGui.TreePop();
+    }
+
+    private static void FoldPlanMisses(IReadOnlyList<PlanMiss> misses, string plan)
+    {
+        var open = Fold(Loc.T("Mitigation plan"), "pplan");
+        PlanMissesSummary(misses, plan);
+        if (!open)
+            return;
+
+        if (misses.Count == 0)
+        {
+            Theme.Hint(Loc.T("Every skill of your column was used in time."));
+        }
+        else
+        {
+            using var table = DetailTable("##pplantable", (Loc.T("Time"), 60), (Loc.T("Skill"), -2), (Loc.T("Cast"), -3));
+            if (table)
+            {
+                foreach (var m in misses)
+                {
+                    ImGui.TableNextRow();
+                    TimeCell(m.AtSeconds);
+                    IconCell(ActionIcons.OfAction(m.ActionId), GameNames.Action(m.ActionId, m.Action));
+                    ImGui.TableNextColumn();
+                    ImGui.TextColored(Theme.TextMuted, m.Cast);
+                }
+            }
+        }
+
+        ImGui.TreePop();
+    }
+
+    // The count of misses (green "none" without any), then the icon of each skill missed and how many times.
+    private static void PlanMissesSummary(IReadOnlyList<PlanMiss> misses, string plan)
+    {
+        if (misses.Count == 0)
+        {
+            ImGui.TextColored(Theme.Good, Loc.T("none"));
+        }
+        else
+        {
+            ImGui.TextColored(Theme.Bad, misses.Count.ToString());
+            foreach (var group in misses.GroupBy(m => m.ActionId).OrderByDescending(g => g.Count()))
+            {
+                var list = group.ToList();
+                ImGui.SameLine(0, Theme.Px(10));
+                var hovered = ActionIcons.Draw(ActionIcons.OfAction(group.Key), ImGui.GetTextLineHeight());
+                ImGui.SameLine(0, Theme.Px(4));
+                ImGui.TextColored(Theme.Bad, $"×{list.Count}");
+                if (hovered || ImGui.IsItemHovered())
+                    ImGui.SetTooltip(string.Join("\n", list.Select(PlanMissText)));
+            }
+        }
+
+        if (plan.Length > 0)
+        {
+            ImGui.SameLine(0, Theme.Px(10));
+            ImGui.TextColored(Theme.TextFaint, plan);
+        }
+    }
+
+    private static string PlanMissText(PlanMiss m) =>
+        Loc.F("{0}  {1} not used for {2}", NumberFormat.Duration(TimeSpan.FromSeconds(Math.Max(0, m.AtSeconds))),
+              GameNames.Action(m.ActionId, m.Action), m.Cast);
+
+    /// <summary>One line with the skills of your column of the mitigation plan not used in time; hover for details.</summary>
+    private static void DrawPlanMisses(IReadOnlyList<PlanMiss> misses, string plan)
+    {
+        ImGui.TextColored(Theme.TextMuted, Loc.T("Mitigation plan"));
+        ImGui.SameLine(0, Theme.Px(6));
+        PlanMissesSummary(misses, plan);
+        Theme.HelpMarker(Loc.T("The skills of your column of the active mitigation plan not used in time: between 15 s before the cast landed and 1 s after (the pre-pull: around its time). Choose your column and the plan in the Mitigation plans window."));
     }
 
     private static void FoldDots(IReadOnlyList<DotUptime> dots)
@@ -821,7 +895,7 @@ public sealed partial class MainWindow
             }
         }
 
-        Theme.HelpMarker(Loc.T("Combo steps used without the step before them (they lose their combo bonus), combos restarted before they were finished, combos whose timer ran out before the next step, and job errors: buffs that ran out unused (Paladin: Goring Blade, Divine Might, Requiescat, Blade of Honor, Atonement, Confiteor; Warrior: Inner Release, Berserk, Primal Rend, Primal Ruination, Nascent Chaos, Wrathful; Dark Knight: Scorn, Delirium; Gunbreaker: Ready to Break, Ready to Reign, and each continuation, also when the next GCD replaces it), offensive actions used without a buff that must stay up (Warrior: Surging Tempest, after the 3 GCDs allowed to put it back at the pull or after downtime; Dark Knight: Darkside, after 1 GCD), and a Paladin Holy Spirit or Holy Circle spending a Requiescat charge from level 80, Dark Knight Delirium combo broken by a basic combo step, Gunbreaker Gnashing Fang combo broken (basic combos, Sonic Break, Double Down), The Blackest Night running out without breaking, and Salted Earth ending without Salt and Darkness. Actions the game lets you use without breaking a combo are ignored."));
+        Theme.HelpMarker(Loc.T("Combo steps used without the step before them (they lose their combo bonus), combos restarted before they were finished, combos whose timer ran out before the next step, and job errors: buffs that ran out unused (Paladin: Goring Blade, Divine Might, Requiescat, Blade of Honor, Atonement, Confiteor; Warrior: Inner Release, Berserk, Primal Rend, Primal Ruination, Nascent Chaos, Wrathful; Dark Knight: Scorn, Delirium; Gunbreaker: Ready to Break, Ready to Reign, and each continuation, also when the next GCD replaces it), offensive actions used without a buff that must stay up (Warrior: Surging Tempest, after the 3 GCDs allowed to put it back at the pull or after downtime; Dark Knight: Darkside, after 1 GCD), and a Paladin Holy Spirit or Holy Circle spending a Requiescat charge from level 80, Paladin Royal Authority replacing an Atonement combo not finished, Dark Knight Delirium combo broken by a basic combo step, Gunbreaker Gnashing Fang combo broken (basic combos, Sonic Break, Double Down) and Reign of Beasts combo broken (basic combos, Gnashing Fang combo, Fated Circle), The Blackest Night running out without breaking, and Salted Earth ending without Salt and Darkness. Actions the game lets you use without breaking a combo are ignored."));
     }
 
     // The buff for a time without it (its line shows the buff, not the action that puts it up), else the action.
@@ -840,6 +914,8 @@ public sealed partial class MainWindow
         ComboMistakeKind.BuffExpired when m.Count == 1 => Loc.F("{0} ran out with 1 charge unused",GameNames.Status(m.ExpectedId, m.Expected)),
         ComboMistakeKind.WithoutBuff when m.Count > 1 => Loc.F("{0} missing: {1} offensive actions without it, for {2:0}s",GameNames.Status(m.ExpectedId, m.Expected),m.Count,m.EndSeconds - m.AtSeconds),
         ComboMistakeKind.WithoutBuff => Loc.F("{0} missing: 1 offensive action without it",GameNames.Status(m.ExpectedId, m.Expected)),
+        ComboMistakeKind.SideComboBroken => Loc.F("{0} combo broken by {1} after {2}",GameNames.Action(m.ActionId, m.Action),GameNames.Action(m.ExpectedId, m.Expected),GameNames.Action(m.StepId, m.Step)),
+        ComboMistakeKind.ComboOverwritten => Loc.F("{0} combo replaced by {1}: {2} was still to use",GameNames.Action(m.ActionId, m.Action),GameNames.Action(m.ExpectedId, m.Expected),GameNames.Action(m.StepId, m.Step)),
         ComboMistakeKind.ShieldUnbroken => Loc.F("{0} ran out without breaking: no free {1}",GameNames.Action(m.ActionId, m.Action),GameNames.Action(m.ExpectedId, m.Expected)),
         ComboMistakeKind.FollowUpMissed => Loc.F("{0} not used before the end of {1}",GameNames.Action(m.ActionId, m.Action),GameNames.Action(m.ExpectedId, m.Expected)),
         ComboMistakeKind.BuffExpired => Loc.F("{0} ran out unused",GameNames.Status(m.ExpectedId, m.Expected)),
