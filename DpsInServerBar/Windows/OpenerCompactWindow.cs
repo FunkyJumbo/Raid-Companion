@@ -41,7 +41,7 @@ public sealed class OpenerCompactWindow : Window
 
     public override void PreDraw()
     {
-        BgAlpha = plugin.Configuration.OpenerOpacity; // the background only, not the icons
+        BgAlpha = Theme.WindowAlpha(plugin.Configuration.OpenerOpacity); // the background only, not the icons
         themeScope = Theme.Push();
         var scale = Scale;
         styleScope = ImRaii.PushStyle(ImGuiStyleVar.WindowRounding, Theme.Px(10) * scale)
@@ -67,6 +67,7 @@ public sealed class OpenerCompactWindow : Window
     public override void Draw()
     {
         shot.Step();
+        Theme.BlurBehind(plugin.Configuration.OpenerOpacity > 0.05f);
         ImGui.SetWindowFontScale(Scale);
         DrawMenu();
         full.DrawCompact();

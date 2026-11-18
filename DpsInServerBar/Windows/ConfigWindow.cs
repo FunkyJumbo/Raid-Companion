@@ -106,6 +106,7 @@ public sealed class ConfigWindow : Window
     public override void Draw()
     {
         shot.Step();
+        Theme.BlurBehind();
         var sidebarWidth = Theme.Px(170);
         windowSize = ImGui.GetWindowSize();
         var contentTop = ImGui.GetCursorPosY();
@@ -508,7 +509,8 @@ public sealed class ConfigWindow : Window
         var savedSelected = c.SavedThemeIndex >= 0 && c.SavedThemeIndex < c.SavedThemes.Count;
 
         Theme.SectionHeader(Loc.T("Theme"));
-        foreach (var preset in Enum.GetValues<ThemePreset>())
+        // The custom theme last.
+        foreach (var preset in Enum.GetValues<ThemePreset>().OrderBy(p => p == ThemePreset.Custom))
         {
             var colors = preset == ThemePreset.Custom ? c.CustomTheme : ThemePalette.For(preset);
             DrawSwatches(colors);
@@ -522,6 +524,7 @@ public sealed class ConfigWindow : Window
             }
         }
 
+        changed |= DrawThemeSharing();
         changed |= DrawSavedThemes();
 
         Theme.SectionHeader(Loc.T("Background"));
@@ -534,6 +537,28 @@ public sealed class ConfigWindow : Window
         }
 
         Help(Loc.T("How much of the game shows through the plugin's windows. Text and fields stay opaque."));
+
+        var glass = c.GlassEffect;
+        if (ImGui.Checkbox(Loc.T("Glass effect"), ref glass))
+        {
+            c.GlassEffect = glass;
+            changed = true;
+        }
+
+        Help(Loc.T("Turns the theme in use, whichever it is, into frosted glass: see-through windows with the game blurred behind them, light rims and rounder corners."));
+
+        if (c.GlassEffect)
+        {
+            var blur = c.GlassBlur;
+            ImGui.SetNextItemWidth(Theme.Px(240));
+            if (ImGui.SliderFloat(Loc.T("Blur behind"), ref blur, 0f, 12f, "%.1f"))
+            {
+                c.GlassBlur = blur;
+                changed = true;
+            }
+
+            Help(Loc.T("Glass effect: how blurred the game is behind the windows. 0 for none."));
+        }
 
         // The colors edited: those of the saved theme in use, otherwise the custom theme.
         savedSelected = c.SavedThemeIndex >= 0 && c.SavedThemeIndex < c.SavedThemes.Count;
@@ -617,6 +642,57 @@ public sealed class ConfigWindow : Window
     }
 
     /// <summary>The saved themes, each selectable, renamable and deletable.</summary>
+    private string themeMessage = string.Empty;
+    private bool themeMessageIsError;
+
+    // Share the theme in use with a code, or import one shared by another player (as a saved theme).
+    private bool DrawThemeSharing()
+    {
+        var c = plugin.Configuration;
+        var changed = false;
+        if (ImGui.Button(Loc.T("Share the theme in use")))
+        {
+            var savedSelected = c.SavedThemeIndex >= 0 && c.SavedThemeIndex < c.SavedThemes.Count;
+            var name = savedSelected ? c.SavedThemes[c.SavedThemeIndex].Name : ThemePalette.Name(c.ThemePreset);
+            ImGui.SetClipboardText(c.ActivePalette.Export(name));
+            themeMessage = Loc.T("Theme code copied: paste it anywhere, the other player clicks \"Import a theme\".");
+            themeMessageIsError = false;
+        }
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(Loc.T("Copies a code holding the colors of the theme in use."));
+
+        ImGui.SameLine();
+        if (ImGui.Button(Loc.T("Import a theme")))
+        {
+            if (ThemePalette.Import(ImGui.GetClipboardText() ?? string.Empty) is { } theme)
+            {
+                // A name of its own among the saved themes.
+                var name = theme.Name;
+                for (var n = 2; c.SavedThemes.Any(t => t.Name.Equals(name, StringComparison.OrdinalIgnoreCase)); n++)
+                    name = $"{theme.Name} ({n})";
+                theme.Name = name;
+                c.SavedThemes.Add(theme);
+                c.SavedThemeIndex = c.SavedThemes.Count - 1;
+                themeMessage = Loc.F("Imported: {0}, now in use (Saved themes).", name);
+                themeMessageIsError = false;
+                changed = true;
+            }
+            else
+            {
+                themeMessage = Loc.T("The clipboard holds no theme code: copy the code first.");
+                themeMessageIsError = true;
+            }
+        }
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(Loc.T("Adds the theme whose code is in the clipboard to your saved themes, and uses it."));
+
+        if (themeMessage.Length > 0)
+            ImGui.TextColored(themeMessageIsError ? Theme.Bad : Theme.Good, themeMessage);
+        return changed;
+    }
+
     private bool DrawSavedThemes()
     {
         var c = plugin.Configuration;

@@ -92,6 +92,7 @@ public sealed class MitigationWindow : Window
     public override void Draw()
     {
         shot.Step();
+        Theme.BlurBehind();
         if (Editing() is { } plan)
         {
             DrawEditorBar(plan);
@@ -213,8 +214,10 @@ public sealed class MitigationWindow : Window
                           .OrderBy(g => g.Key == here ? 0 : 1).ThenBy(g => g.First().Encounter)
                           .ToList();
         var any = false;
+        var style = ImGui.GetStyle();
         var buttons = ImGui.CalcTextSize(Loc.T("Show")).X + ImGui.CalcTextSize(Loc.T("Edit")).X
-                      + ImGui.GetStyle().FramePadding.X * 4 + ImGui.GetStyle().ItemSpacing.X + ImGui.GetFrameHeight() * 2;
+                      + (style.FramePadding.X + style.FrameBorderSize) * 4 + style.ItemSpacing.X * 2
+                      + Theme.IconButtonWidth(FontAwesomeIcon.Trash);
         using var list = ImRaii.Child("##planlist", new Vector2(-1, -1));
         foreach (var fight in fights)
         {

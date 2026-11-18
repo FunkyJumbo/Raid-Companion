@@ -74,7 +74,7 @@ public sealed class OpenerWindow : Window
     public override void PreDraw()
     {
         themeScope = Theme.Push();
-        BgAlpha = plugin.Configuration.OpenerOpacity; // the background only, not the icons and text
+        BgAlpha = Theme.WindowAlpha(plugin.Configuration.OpenerOpacity); // the background only, not the icons and text
 
         // Stretch it sideways to fit a long opener on fewer rows (at most the whole opener on one row); its height
         // always follows the content.
@@ -114,6 +114,7 @@ public sealed class OpenerWindow : Window
     public override void Draw()
     {
         shot.Step();
+        Theme.BlurBehind(plugin.Configuration.OpenerOpacity > 0.05f);
         DrawContent();
         windowWidth = ImGui.GetWindowWidth();
         contentHeight = ImGui.GetCursorPosY() - ImGui.GetStyle().ItemSpacing.Y + ImGui.GetStyle().WindowPadding.Y;

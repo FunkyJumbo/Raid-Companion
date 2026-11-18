@@ -17,9 +17,24 @@ public static class Theme
     private static ThemePalette palette = ThemePalette.For(ThemePreset.Midnight);
     private static float opacity = 0.96f;
 
-    /// <summary>Window background, at the opacity chosen in the settings.</summary>
-    public static Vector4 Ink => palette.Background with { W = opacity };
-    public static Vector4 Panel => Mix(palette.Background, palette.Surface, 0.4f);
+    /// <summary>The glass effect, on any theme: see-through frosted windows, the game blurred behind them, light rims.</summary>
+    public static bool Glass { get; private set; }
+
+    private static float glassBlur = 8f;
+
+    // Glass: how much of the window lets the (blurred) game through, and the white of its rims and frosted fields.
+    private const float GlassWindow = 0.42f;
+    private static readonly Vector4 Frost = new(1, 1, 1, 1);
+
+    /// <summary>Window background, at the opacity chosen in the settings (Glass: never more than see-through).</summary>
+    /// <summary>
+    /// The background alpha of a window with an opacity of its own (compact meter, opener practice): as chosen, or with
+    /// the glass effect, that share of the see-through glass (100%: the glass as the other windows have it).
+    /// </summary>
+    public static float WindowAlpha(float chosen) => Glass ? Math.Clamp(chosen, 0f, 1f) * GlassWindow : chosen;
+
+    public static Vector4 Ink => palette.Background with { W = Glass ? Math.Min(opacity, GlassWindow) : opacity };
+    public static Vector4 Panel => Mix(palette.Background, palette.Surface, 0.4f) with { W = Glass ? 0.55f : 1f };
     public static Vector4 Surface => palette.Surface;
     public static Vector4 SurfaceHover => Lighten(palette.Surface, 0.07f);
     public static Vector4 SurfaceActive => Lighten(palette.Surface, 0.13f);
@@ -52,6 +67,8 @@ public static class Theme
     {
         palette = config.ActivePalette;
         opacity = Math.Clamp(config.BackgroundOpacity, 0.2f, 1f);
+        glassBlur = Math.Clamp(config.GlassBlur, 0f, 12f);
+        Glass = config.GlassEffect;
     }
 
     public static Vector4 Mix(Vector4 a, Vector4 b, float t) => a + (b - a) * t;
@@ -73,7 +90,9 @@ public static class Theme
     public static uint U32(Vector4 c, float a = 1f) => ImGui.GetColorU32(Alpha(c, a));
 
     /// <summary>Pushes the colors and metrics of the theme. Dispose to restore Dalamud's style.</summary>
-    public static IDisposable Push()
+    public static IDisposable Push() => Glass ? PushGlass() : PushSolid();
+
+    private static IDisposable PushSolid()
     {
         var clear = new Vector4(0, 0, 0, 0);
         var colors = ImRaii.PushColor(ImGuiCol.WindowBg, Ink)
@@ -139,6 +158,54 @@ public static class Theme
             .Push(ImGuiStyleVar.CellPadding, Px(new Vector2(8, 5)));
 
         return new Scope(colors, styles);
+    }
+
+    /// <summary>
+    /// Glass effect: blurs the game behind the current window (call at the start of its Draw). Drawn by the plugin, so
+    /// it does not need Dalamud's own window blur turned on. <paramref name="allowed"/>: false for a window whose
+    /// background was made fully transparent.
+    /// </summary>
+    public static void BlurBehind(bool allowed = true)
+    {
+        if (!Glass || !allowed || glassBlur <= 0)
+            return;
+
+        var pos = ImGui.GetWindowPos();
+        ImGuiHelpers.PrependBlurBehind(ImGui.GetWindowDrawList(), pos, pos + ImGui.GetWindowSize(), glassBlur,
+                                       ImGui.GetStyle().WindowRounding, palette.Background with { W = 0.18f },
+                                       Vector4.Zero, 0.03f);
+    }
+
+    // Glass: the solid theme, then see-through fields and title bar, light rims, rounder corners.
+    private static IDisposable PushGlass()
+    {
+        var solid = PushSolid();
+        var rim = Alpha(Frost, 0.16f);
+        var colors = ImRaii.PushColor(ImGuiCol.Border, rim)
+            .Push(ImGuiCol.ChildBg, Alpha(Frost, 0.025f))
+            .Push(ImGuiCol.PopupBg, palette.Background with { W = 0.78f })
+            .Push(ImGuiCol.TitleBg, palette.Background with { W = 0.35f })
+            .Push(ImGuiCol.TitleBgActive, Mix(palette.Background, palette.Surface, 0.5f) with { W = 0.5f })
+            .Push(ImGuiCol.TitleBgCollapsed, palette.Background with { W = 0.3f })
+            .Push(ImGuiCol.FrameBg, Alpha(Frost, 0.07f))
+            .Push(ImGuiCol.FrameBgHovered, Alpha(Frost, 0.12f))
+            .Push(ImGuiCol.FrameBgActive, Alpha(Frost, 0.17f))
+            .Push(ImGuiCol.Button, Alpha(Frost, 0.08f))
+            .Push(ImGuiCol.ButtonHovered, Alpha(Frost, 0.14f))
+            .Push(ImGuiCol.ButtonActive, Alpha(Frost, 0.2f))
+            .Push(ImGuiCol.Separator, rim)
+            .Push(ImGuiCol.TableHeaderBg, Alpha(Frost, 0.06f))
+            .Push(ImGuiCol.TableBorderStrong, rim)
+            .Push(ImGuiCol.TableBorderLight, Alpha(Frost, 0.07f))
+            .Push(ImGuiCol.TableRowBgAlt, Alpha(Frost, 0.03f))
+            .Push(ImGuiCol.ScrollbarGrab, Alpha(Frost, 0.18f));
+        var styles = ImRaii.PushStyle(ImGuiStyleVar.WindowRounding, Px(14))
+            .Push(ImGuiStyleVar.ChildRounding, Px(10))
+            .Push(ImGuiStyleVar.FrameRounding, Px(8))
+            .Push(ImGuiStyleVar.PopupRounding, Px(10))
+            .Push(ImGuiStyleVar.FrameBorderSize, 1f)
+            .Push(ImGuiStyleVar.TabRounding, Px(8));
+        return new Scope(solid, colors, styles);
     }
 
     private sealed class Scope(params IDisposable[] parts) : IDisposable
@@ -294,6 +361,14 @@ public static class Theme
     }
 
     /// <summary>A button showing only a FontAwesome glyph, with a tooltip.</summary>
+    /// <summary>Width of an <see cref="IconButton"/>: its glyph in the icon font, its padding and its border.</summary>
+    public static float IconButtonWidth(FontAwesomeIcon icon)
+    {
+        using var font = ImRaii.PushFont(UiBuilder.IconFont);
+        var style = ImGui.GetStyle();
+        return ImGui.CalcTextSize(icon.ToIconString()).X + style.FramePadding.X * 2 + style.FrameBorderSize * 2;
+    }
+
     public static bool IconButton(string id, FontAwesomeIcon icon, string tooltip, Vector4? color = null)
     {
         bool clicked;

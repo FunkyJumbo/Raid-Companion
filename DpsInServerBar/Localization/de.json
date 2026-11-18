@@ -884,5 +884,17 @@
   "(instant)": "(sofort)",
   "Expansions shown": "Angezeigte Erweiterungen",
   "Show them all": "Alle anzeigen",
-  "No fight in the expansions shown.": "Kein Kampf in den angezeigten Erweiterungen."
+  "No fight in the expansions shown.": "Kein Kampf in den angezeigten Erweiterungen.",
+  "Blur behind": "Unschärfe dahinter",
+  "Glass effect": "Glaseffekt",
+  "Turns the theme in use, whichever it is, into frosted glass: see-through windows with the game blurred behind them, light rims and rounder corners.": "Verwandelt das verwendete Thema, egal welches, in Milchglas: durchscheinende Fenster mit dem verschwommenen Spiel dahinter, helle Ränder und rundere Ecken.",
+  "Glass effect: how blurred the game is behind the windows. 0 for none.": "Glaseffekt: wie stark das Spiel hinter den Fenstern verschwommen ist. 0 für keine Unschärfe.",
+  "Frost (icy blue & lavender)": "Frost (Eisblau & Lavendel)",
+  "Share the theme in use": "Verwendetes Thema teilen",
+  "Theme code copied: paste it anywhere, the other player clicks \"Import a theme\".": "Thema-Code kopiert: Füge ihn irgendwo ein, der andere Spieler klickt auf „Thema importieren“.",
+  "Copies a code holding the colors of the theme in use.": "Kopiert einen Code mit den Farben des verwendeten Themas.",
+  "Import a theme": "Thema importieren",
+  "Imported: {0}, now in use (Saved themes).": "Importiert: {0}, jetzt in Verwendung (Gespeicherte Themen).",
+  "The clipboard holds no theme code: copy the code first.": "Die Zwischenablage enthält keinen Thema-Code: Kopiere zuerst den Code.",
+  "Adds the theme whose code is in the clipboard to your saved themes, and uses it.": "Fügt das Thema, dessen Code in der Zwischenablage ist, zu deinen gespeicherten Themen hinzu und verwendet es."
 }

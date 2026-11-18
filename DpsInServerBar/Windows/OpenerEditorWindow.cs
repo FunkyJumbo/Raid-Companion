@@ -96,6 +96,7 @@ public sealed class OpenerEditorWindow : Window
     public override void Draw()
     {
         shot.Step();
+        Theme.BlurBehind();
         FollowPull();
         DrawTopBar();
         Theme.Rule();

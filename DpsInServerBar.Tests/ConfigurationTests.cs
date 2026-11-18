@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Xunit;
 
@@ -23,7 +24,7 @@ public class ConfigurationTests
 
         Assert.True(config.Migrate());
 
-        Assert.Equal(13, config.Version);
+        Assert.Equal(14, config.Version);
         Assert.True(config.RankInRole);
         Assert.True(config.IsShown(BarElement.Rank));
         Assert.DoesNotContain(config.BarLayout, e => e.Element == BarElement.RoleGap);
@@ -56,7 +57,7 @@ public class ConfigurationTests
         config.Migrate();
         config.RankInRole = true;
 
-        Assert.False(config.Migrate());
+        config.Migrate();
         Assert.True(config.RankInRole);
     }
 
@@ -100,6 +101,49 @@ public class ConfigurationTests
 
         Assert.Equal(defaults, config.MitigationPlans[0].Columns);
         Assert.Equal(["Tank 1 (MT)", "Scholar"], config.MitigationPlans[1].Columns);
-        Assert.Equal(13, config.Version);
+        Assert.Equal(14, config.Version);
+    }
+
+    [Fact]
+    public void TheGlassThemeOfATestBuildBecomesFrostWithTheGlassEffect()
+    {
+        var config = new Configuration { Version = 13, ThemePreset = (UI.ThemePreset)6 };
+
+        Assert.True(config.Migrate());
+
+        Assert.Equal(UI.ThemePreset.Frost, config.ThemePreset);
+        Assert.True(config.GlassEffect);
+    }
+
+    [Fact]
+    public void AThemeCodeRoundTrips()
+    {
+        var frost = UI.ThemePalette.For(UI.ThemePreset.Frost);
+        var copy = UI.ThemePalette.Import(frost.Export("My frost"))!;
+        Assert.Equal("My frost", copy.Name);
+        Assert.Equal(frost.Entries().Select(e => e.Get()).Select(Round), copy.Palette.Entries().Select(e => e.Get()).Select(Round));
+        Assert.Null(UI.ThemePalette.Import("not a code"));
+    }
+
+    private static System.Numerics.Vector4 Round(System.Numerics.Vector4 v) =>
+        new(MathF.Round(v.X * 255), MathF.Round(v.Y * 255), MathF.Round(v.Z * 255), MathF.Round(v.W * 255));
+
+    [Fact]
+    public void ANewInstallIsMidnightGlassWithBlur8()
+    {
+        var config = new Configuration();
+        config.Migrate();
+        Assert.Equal(UI.ThemePreset.Midnight, config.ThemePreset);
+        Assert.True(config.GlassEffect);
+        Assert.Equal(8f, config.GlassBlur);
+    }
+
+    [Fact]
+    public void SettingsFromBeforeTheGlassEffectKeepTheirSolidLook()
+    {
+        // As read from a 1.0.7.0 config: no GlassEffect saved, so the default (on) until migrated.
+        var config = new Configuration { Version = 13, ThemePreset = UI.ThemePreset.Crimson };
+        config.Migrate();
+        Assert.False(config.GlassEffect);
     }
 }

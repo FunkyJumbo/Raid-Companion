@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Numerics;
 
@@ -12,6 +13,9 @@ public enum ThemePreset
     Aether,
     Slate,
     Custom,
+
+    /// <summary>Frost: icy blue and lavender (after Custom: themes are saved by number).</summary>
+    Frost,
 }
 
 /// <summary>
@@ -68,6 +72,11 @@ public sealed class ThemePalette
             Background = Rgb(0x10, 0x0C, 0x1C), Surface = Rgb(0x20, 0x1A, 0x33), Accent = Rgb(0x7F, 0xD8, 0xE8),
             Secondary = Rgb(0xB0, 0x8C, 0xF0), Text = Rgb(0xE6, 0xE2, 0xF2),
         }.WithStatus(),
+        ThemePreset.Frost => new ThemePalette
+        {
+            Background = Rgb(0x10, 0x14, 0x20), Surface = Rgb(0x34, 0x3E, 0x56), Accent = Rgb(0x9C, 0xD6, 0xFF),
+            Secondary = Rgb(0xC6, 0xB4, 0xFF), Text = Rgb(0xF3, 0xF6, 0xFB),
+        }.WithStatus(),
         ThemePreset.Slate => new ThemePalette
         {
             Background = Rgb(0x14, 0x15, 0x18), Surface = Rgb(0x24, 0x26, 0x2B), Accent = Rgb(0x6F, 0xA8, 0xF0),
@@ -87,6 +96,7 @@ public sealed class ThemePalette
         ThemePreset.Emerald => Loc.T("Emerald (forest & gold)"),
         ThemePreset.Aether => Loc.T("Aether (violet & cyan)"),
         ThemePreset.Slate => Loc.T("Slate (grey & blue)"),
+        ThemePreset.Frost => Loc.T("Frost (icy blue & lavender)"),
         _ => Loc.T("Custom"),
     };
 
@@ -103,6 +113,60 @@ public sealed class ThemePalette
     }
 
     private static Vector4 Rgb(int r, int g, int b) => new(r / 255f, g / 255f, b / 255f, 1f);
+
+    // ------------------------------------------------------------------ Share codes
+
+    public const string CodePrefix = "RCTHEME1:";
+
+    private sealed record Code(string N, string[] C);
+
+    /// <summary>A text code holding a theme (its name and colors), for another player to import.</summary>
+    public string Export(string name)
+    {
+        static string Hex(Vector4 c) =>
+            string.Concat(new[] { c.X, c.Y, c.Z, c.W }.Select(v => ((int)Math.Round(Math.Clamp(v, 0, 1) * 255)).ToString("X2")));
+        var json = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new Code(name, Entries().Select(e => Hex(e.Get())).ToArray()));
+        using var output = new System.IO.MemoryStream();
+        using (var deflate = new System.IO.Compression.DeflateStream(output, System.IO.Compression.CompressionLevel.SmallestSize))
+            deflate.Write(json);
+        return CodePrefix + Convert.ToBase64String(output.ToArray());
+    }
+
+    /// <summary>The theme held by a code (its name and colors), null when the text is not a theme code.</summary>
+    public static SavedTheme? Import(string code)
+    {
+        code = code.Trim();
+        if (!code.StartsWith(CodePrefix, StringComparison.Ordinal))
+            return null;
+
+        try
+        {
+            using var input = new System.IO.Compression.DeflateStream(new System.IO.MemoryStream(Convert.FromBase64String(code[CodePrefix.Length..])),
+                                                                       System.IO.Compression.CompressionMode.Decompress);
+            using var json = new System.IO.MemoryStream();
+            input.CopyTo(json);
+            var data = System.Text.Json.JsonSerializer.Deserialize<Code>(json.ToArray());
+            if (data is null)
+                return null;
+
+            var palette = For(ThemePreset.Midnight);
+            var entries = palette.Entries().ToList();
+            for (var i = 0; i < entries.Count && i < data.C.Length; i++)
+            {
+                var hex = data.C[i];
+                if (hex.Length != 8)
+                    return null;
+                entries[i].Set(new Vector4(Convert.ToInt32(hex[..2], 16), Convert.ToInt32(hex[2..4], 16),
+                                           Convert.ToInt32(hex[4..6], 16), Convert.ToInt32(hex[6..], 16)) / 255f);
+            }
+
+            return new SavedTheme { Name = data.N.Trim().Length > 0 ? data.N.Trim() : "Shared theme", Palette = palette };
+        }
+        catch (Exception e) when (e is FormatException or System.IO.InvalidDataException or System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
 }
 
 /// <summary>A custom theme saved by the user under a name.</summary>

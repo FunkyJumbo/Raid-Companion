@@ -159,6 +159,7 @@ public sealed partial class MainWindow : Window
     public override void Draw()
     {
         shot.Step();
+        Theme.BlurBehind();
         Theme.TabStrip("main", ref selectedTab,
                        (FontAwesomeIcon.Bolt, Loc.T("Live")), (FontAwesomeIcon.History, Loc.T("History")), (FontAwesomeIcon.ChartLine, Loc.T("Progression")));
         DrawSourceAndSettings();
@@ -204,7 +205,7 @@ public sealed partial class MainWindow : Window
         var source = plugin.Tracker;
         var status = $"{source.Name}: {source.StatusText}";
         var badgeWidth = ImGui.CalcTextSize(status).X + Theme.Px(14);
-        var buttonWidth = ImGui.GetFrameHeight();
+        var buttonWidth = Theme.IconButtonWidth(FontAwesomeIcon.Cog);
         var spacing = ImGui.GetStyle().ItemSpacing.X;
         ImGui.SameLine(ImGui.GetWindowContentRegionMax().X - badgeWidth - buttonWidth - spacing);
 

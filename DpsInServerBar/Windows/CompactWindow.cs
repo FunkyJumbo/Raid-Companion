@@ -37,8 +37,7 @@ public sealed class CompactWindow : Window
 
     public override void PreDraw()
     {
-        BgAlpha = plugin.Configuration.CompactOpacity;
-
+        BgAlpha = Theme.WindowAlpha(plugin.Configuration.CompactOpacity);
         themeScope = Theme.Push();
         styleScope = ImRaii.PushStyle(ImGuiStyleVar.WindowRounding, Theme.Px(10))
                           .Push(ImGuiStyleVar.WindowPadding, Theme.Px(new Vector2(8, 7)));
@@ -56,6 +55,7 @@ public sealed class CompactWindow : Window
     public override void Draw()
     {
         shot.Step();
+        Theme.BlurBehind(plugin.Configuration.CompactOpacity > 0.05f);
         var config = plugin.Configuration;
         DrawMenu(config);
 

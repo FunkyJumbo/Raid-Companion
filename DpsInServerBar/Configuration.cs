@@ -220,7 +220,7 @@ public sealed class BarPreset
 [Serializable]
 public sealed class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 13;
+    public int Version { get; set; } = 14;
 
     /// <summary>Order and visibility of the elements of the server bar text.</summary>
     [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
@@ -400,6 +400,15 @@ public sealed class Configuration : IPluginConfiguration
 
     /// <summary>Opacity of the windows' background, 0.2 to 1.</summary>
     public float BackgroundOpacity { get; set; } = 0.96f;
+
+    /// <summary>
+    /// Glass effect on the theme in use: see-through frosted windows, the game blurred behind them. On for a new
+    /// install; settings from before it existed keep their solid look (see Migrate).
+    /// </summary>
+    public bool GlassEffect { get; set; } = true;
+
+    /// <summary>Glass effect: strength of the blur of the game behind the windows (0: none).</summary>
+    public float GlassBlur { get; set; } = 8f;
 
     // Colors (RGBA, 0-1)
     public bool UseColors { get; set; } = true;
@@ -613,6 +622,21 @@ public sealed class Configuration : IPluginConfiguration
             foreach (var plan in MitigationPlans)
                 plan.RemoveRepeatedDefaultColumns();
             Version = 13;
+            changed = true;
+        }
+
+        // Settings from before the glass effect keep their solid look (it is on for new installs only); the Glass theme
+        // of a test build (number 6, now Frost) became the Frost colors with the glass effect.
+        if (Version < 14)
+        {
+            GlassEffect = ThemePreset == ThemePreset.Frost;
+            Version = 14;
+            changed = true;
+        }
+
+        if (!Enum.IsDefined(ThemePreset))
+        {
+            ThemePreset = ThemePreset.Midnight;
             changed = true;
         }
 

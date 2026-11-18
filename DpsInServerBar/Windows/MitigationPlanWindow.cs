@@ -69,6 +69,7 @@ public sealed class MitigationPlanWindow : Window
     public override void Draw()
     {
         shot.Step();
+        Theme.BlurBehind();
         if (Plan() is not { } plan)
         {
             Theme.Hint(Loc.T("This plan was deleted."));

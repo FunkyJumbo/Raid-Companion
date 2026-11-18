@@ -887,5 +887,17 @@
   "(instant)": "(instantané)",
   "Expansions shown": "Extensions affichées",
   "Show them all": "Tout afficher",
-  "No fight in the expansions shown.": "Aucun combat dans les extensions affichées."
+  "No fight in the expansions shown.": "Aucun combat dans les extensions affichées.",
+  "Blur behind": "Flou derrière",
+  "Glass effect": "Effet verre",
+  "Turns the theme in use, whichever it is, into frosted glass: see-through windows with the game blurred behind them, light rims and rounder corners.": "Transforme le thème utilisé, quel qu'il soit, en verre dépoli : fenêtres translucides avec le jeu flouté derrière, bordures claires et coins plus arrondis.",
+  "Glass effect: how blurred the game is behind the windows. 0 for none.": "Effet verre : à quel point le jeu est flouté derrière les fenêtres. 0 pour aucun flou.",
+  "Frost (icy blue & lavender)": "Frost (bleu glacé & lavande)",
+  "Share the theme in use": "Partager le thème utilisé",
+  "Theme code copied: paste it anywhere, the other player clicks \"Import a theme\".": "Code du thème copié : collez-le où vous voulez, l'autre joueur clique sur « Importer un thème ».",
+  "Copies a code holding the colors of the theme in use.": "Copie un code contenant les couleurs du thème utilisé.",
+  "Import a theme": "Importer un thème",
+  "Imported: {0}, now in use (Saved themes).": "Importé : {0}, maintenant utilisé (Thèmes enregistrés).",
+  "The clipboard holds no theme code: copy the code first.": "Le presse-papiers ne contient aucun code de thème : copiez d'abord le code.",
+  "Adds the theme whose code is in the clipboard to your saved themes, and uses it.": "Ajoute le thème dont le code est dans le presse-papiers à vos thèmes enregistrés, et l'utilise."
 }

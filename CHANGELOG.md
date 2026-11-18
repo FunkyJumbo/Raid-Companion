@@ -3,6 +3,12 @@
 <!-- One "## <version>" section per release. The Release workflow publishes the section of the tagged
      version as the GitHub release notes; the same notes go into pluginmaster.json (shown in Dalamud). -->
 
+## 1.0.8.0
+
+- Glass effect for every theme (Settings > Appearance): frosted see-through windows, the game blurred behind them. On by default for new installs.
+- A new Frost theme, and themes shared with a code (Share the theme in use, Import a theme).
+- Various UI changes and adjustments.
+
 ## 1.0.7.0
 
 - Mitigation plans (Mitigation plans in Live): the skills each role uses on each cast of a fight, and before the pull, picked by their icon. Made from the casts of a pull in History, imported from a spreadsheet or shared with a code. Followed during the pull, and with your role chosen, the skills you missed show in Personal and on the History timeline.

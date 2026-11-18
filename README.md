@@ -416,7 +416,7 @@ macros keep working.
 | **Display** | **Language** (English, French, German or Al Bhed; Auto follows Dalamud's language), compact meter (columns, header, background opacity), DPS graphs in the main window and their rolling window, **cards shown** in Live and History (GCD uptime card off by default), Limit Break in party DPS, **hide player names** (made-up names in every window, for screenshots) |
 | **DPS in server bar** | Presets (renamable, switchable with `/raidcompanion preset N`), metric, number format (`12345` / `12,345` / `12.3k`), bar elements and their order, separator, **bar preview** (placeholder values for 10 s), auto-hide, colors |
 | **Chat summary** | Pull summary on/off, in dungeons, at the end of each ultimate phase, each party death as it happens (optionally with the overkill), values shown, comparison with your best kill, **preview in chat** |
-| **Appearance** | Theme presets, saved custom themes (renamable), background opacity, custom colors, preview |
+| **Appearance** | Theme presets (Midnight, Crimson, Emerald, Aether, Slate, Frost), saved custom themes (renamable), themes shared with a code, background opacity, **glass effect** on any theme (frosted see-through windows with the game blurred behind them, blur strength adjustable; Midnight with the glass effect for a new install), custom colors, preview |
 | **Pulls history** | Record only in duties, **kinds of content recorded** (ultimates, savage, extremes, criterion, raids, trials, dungeons, other), minimum pull length, history size, tankbuster vulnerabilities ignored |
 | **DPS check** (WIP) | Boss HP, enrage time and minimum party DPS per fight; ultimate phases with each phase's HP, enrage and required DPS; other zones / encounters |
 
