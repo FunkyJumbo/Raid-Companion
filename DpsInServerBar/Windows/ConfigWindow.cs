@@ -307,8 +307,30 @@ public sealed class ConfigWindow : Window
         if (Theme.GhostButton(plugin.CompactOpen ? Loc.T("Close the compact meter") : Loc.T("Open the compact meter")))
             plugin.SetCompact(!plugin.CompactOpen);
 
+        Theme.SectionHeader(Loc.T("Personal"));
+        Theme.Hint(Loc.T("The lines of the Personal section, in Live and in History."));
+        var personalFirst = true;
+        foreach (var (element, label) in PersonalLabels)
+        {
+            // Same line as the previous checkbox when it fits.
+            if (!personalFirst)
+            {
+                ImGui.SameLine();
+                var width = ImGui.GetFrameHeight() + ImGui.GetStyle().ItemInnerSpacing.X + ImGui.CalcTextSize(label).X;
+                if (ImGui.GetContentRegionAvail().X < width)
+                    ImGui.NewLine();
+            }
+
+            personalFirst = false;
+            var on = c.PersonalElements.HasFlag(element);
+            if (ImGui.Checkbox($"{label}##personal", ref on))
+            {
+                c.PersonalElements = on ? c.PersonalElements | element : c.PersonalElements & ~element;
+                changed = true;
+            }
+        }
+
         Theme.SectionHeader(Loc.T("Main window"));
-        changed |= Checkbox(Loc.T("Show DPS graphs in the main window"), c.ShowGraph, v => c.ShowGraph = v);
 
         var window = c.GraphWindowSeconds;
         ImGui.SetNextItemWidth(Theme.Px(120));
@@ -798,6 +820,47 @@ public sealed class ConfigWindow : Window
         ImGui.Dummy(new Vector2(shown.Length * (square + Theme.Px(3)), size));
     }
 
+    // The example of a recap under the settings, with the values ticked only (and the comparison when it is on).
+    private static string RecapExample(Configuration c)
+    {
+        var shown = c.ChatSummaryElements;
+        var best = c.ChatSummaryCompareBest;
+        var parts = new List<string>();
+        if (shown.HasFlag(SummaryElement.Job))
+            parts.Add("DRK");
+        if (shown.HasFlag(SummaryElement.Dps))
+            parts.Add("DPS 21,234 #2/8" + (best ? Loc.F(" NEW BEST ({0})", "+2.1%") : string.Empty));
+        if (shown.HasFlag(SummaryElement.Rdps))
+            parts.Add("rDPS 20,511 #3/8" + (best ? Loc.F(" (best {0})", "-1.2%") : string.Empty));
+        if (shown.HasFlag(SummaryElement.Uptime))
+            parts.Add("GCD 98.7%");
+        if (shown.HasFlag(SummaryElement.PartyDps))
+            parts.Add("pDPS 182,345");
+        if (shown.HasFlag(SummaryElement.Deaths))
+            parts.Add(Loc.F("Deaths {0}", 1));
+        if (shown.HasFlag(SummaryElement.KilledBy))
+            parts.Add(Loc.T("Killed by ") + Loc.T("Auto-attack (Preview Boss, 45,210)"));
+        if (shown.HasFlag(SummaryElement.Mistakes))
+            parts.Add(Loc.T("Mechanics: ") + Loc.T("Vulnerability Up") + " x2");
+        var line = $"{Loc.T("[Recap] ")}Brute Bomber (4:32) {Loc.T("Kill")}";
+        return Loc.T("e.g. ") + string.Join(" | ", parts.Prepend(line));
+    }
+
+    private static (PersonalElement Element, string Label)[] PersonalLabels =>
+    [
+        (PersonalElement.Gcd, Loc.T("GCD uptime")),
+        (PersonalElement.Rotation, Loc.T("Rotation")),
+        (PersonalElement.DamageLoss, Loc.T("DPS lost to Damage Down")),
+        (PersonalElement.Gauge, Loc.T("Gauge overcap")),
+        (PersonalElement.Positionals, Loc.T("Positionals")),
+        (PersonalElement.RotationErrors, Loc.T("Rotation errors")),
+        (PersonalElement.MitigationPlan, Loc.T("Mitigation plan")),
+        (PersonalElement.Dots, Loc.T("DoT uptime")),
+        (PersonalElement.Overheal, Loc.T("Overheal")),
+        (PersonalElement.Mitigation, Loc.T("Mitigation")),
+        (PersonalElement.TankSwaps, Loc.T("Tank swaps")),
+    ];
+
     private static (SummaryElement Element, string Label)[] SummaryLabels =>
     [
         (SummaryElement.Job, Loc.T("Job")),
@@ -889,6 +952,7 @@ public sealed class ConfigWindow : Window
             var item = layout[i];
             using var id = ImRaii.PushId(i);
             ImGui.TableNextRow();
+            Theme.RowHover();
 
             ImGui.TableNextColumn();
             using (ImRaii.Disabled(i == 0))
@@ -1073,6 +1137,7 @@ public sealed class ConfigWindow : Window
 
             using var rowId = ImRaii.PushId((int)fight.TerritoryId);
             ImGui.TableNextRow();
+            Theme.RowHover();
             var here = fight.TerritoryId == plugin.CurrentTerritory;
             var check = FightCheck(fight);
             // Without a check of the player, the built-in one is shown (greyed), and typing a value overrides it.
@@ -1183,6 +1248,7 @@ public sealed class ConfigWindow : Window
         ImGui.TableSetupColumn("##notes", ImGuiTableColumnFlags.WidthStretch, 1f);
         Theme.TableHeaders();
         ImGui.TableNextRow();
+        Theme.RowHover();
 
         ImGui.TableNextColumn();
         ImGui.TextUnformatted(phase.Name);
@@ -1302,6 +1368,7 @@ public sealed class ConfigWindow : Window
 
             using var id = ImRaii.PushId(i);
             ImGui.TableNextRow();
+            Theme.RowHover();
 
             ImGui.TableNextColumn();
             var tid = (int)t.TerritoryId;
@@ -1539,7 +1606,7 @@ public sealed class ConfigWindow : Window
             changed |= Checkbox(Loc.T("Compare DPS, rDPS, GCD and pDPS with your best kill"), c.ChatSummaryCompareBest,
                                 v => c.ChatSummaryCompareBest = v);
             Help(Loc.T("After each value: NEW BEST with the gain, or the gap to your best kill of the same fight. Wipes are never compared."));
-            Theme.Hint(Loc.T("e.g. [Recap] Brute Bomber (4:32) Kill | DRK | DPS 21,234 #2/8 NEW BEST (+2.1%) | rDPS 20,511 #3/8 (best -1.2%) | GCD 98.7%"));
+            Theme.Hint(RecapExample(c));
         }
 
         Theme.SectionHeader(Loc.T("Preview"));

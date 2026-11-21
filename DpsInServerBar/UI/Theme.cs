@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
@@ -66,6 +67,8 @@ public static class Theme
     public static void Configure(Configuration config)
     {
         palette = config.ActivePalette;
+        hiddenSections = config.HiddenSections;
+        saveSections = config.Save;
         opacity = Math.Clamp(config.BackgroundOpacity, 0.2f, 1f);
         glassBlur = Math.Clamp(config.GlassBlur, 0f, 12f);
         Glass = config.GlassEffect;
@@ -273,13 +276,74 @@ public static class Theme
     /// <summary>Room between a section title and what follows (pixels), when a view wants it other than the usual.</summary>
     public static float? SectionTitleGap { get; set; }
 
-    public static void SectionHeader(string label, FontAwesomeIcon? icon = null, string? help = null)
+    // The sections hidden by the player (their keys), from the settings, and how to save them.
+    private static HashSet<string> hiddenSections = [];
+    private static Action? saveSections;
+
+    /// <summary>
+    /// A section header that hides its section: a click on its dash (or title) folds it, the dash turning into a plus,
+    /// and a click on the plus shows it again. False when the section is hidden (its title stays; skip its content).
+    /// <paramref name="key"/> names the section in the settings.
+    /// </summary>
+    public static bool Section(string label, FontAwesomeIcon? icon, string key, string? help = null)
+    {
+        var hidden = hiddenSections.Contains(key);
+        if (SectionHeader(label, icon, help, hidden, key))
+        {
+            if (hidden)
+                hiddenSections.Remove(key);
+            else
+                hiddenSections.Add(key);
+            saveSections?.Invoke();
+        }
+
+        return !hidden;
+    }
+
+    /// <summary>
+    /// A table as wide as its content (columns fitted to what they show), not stretched across the window: a name and
+    /// its figures stay side by side.
+    /// </summary>
+    public const ImGuiTableFlags FitTable = ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.NoHostExtendX;
+
+    public static void SectionHeader(string label, FontAwesomeIcon? icon = null, string? help = null) =>
+        SectionHeader(label, icon, help, null, null);
+
+    // With a key, the dash and title are a button folding the section: a plus when it is folded. True when clicked.
+    private static bool SectionHeader(string label, FontAwesomeIcon? icon, string? help, bool? folded, string? key)
     {
         ImGui.Dummy(new Vector2(0, Px(4) + SectionSpacing));
         var dl = ImGui.GetWindowDrawList();
         var pos = ImGui.GetCursorScreenPos();
-        var lineY = pos.Y + ImGui.GetTextLineHeight() / 2;
-        dl.AddLine(new Vector2(pos.X, lineY), new Vector2(pos.X + Px(12), lineY), U32(Gold, 0.8f), 1.5f);
+        var lineHeight = ImGui.GetTextLineHeight();
+        var lineY = pos.Y + lineHeight / 2;
+
+        var clicked = false;
+        var hovered = false;
+        if (key is not null)
+        {
+            var titleWidth = Px(18) + ImGui.CalcTextSize(label.ToUpperInvariant()).X;
+            if (icon is { } g)
+            {
+                using (ImRaii.PushFont(UiBuilder.IconFont))
+                    titleWidth += ImGui.CalcTextSize(g.ToIconString()).X;
+                titleWidth += ImGui.GetStyle().ItemSpacing.X;
+            }
+
+            clicked = ImGui.InvisibleButton($"##section-{key}", new Vector2(titleWidth, lineHeight));
+            hovered = ImGui.IsItemHovered();
+            if (hovered)
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                ImGui.SetTooltip(folded == true ? Loc.T("Show this section") : Loc.T("Hide this section"));
+            }
+        }
+
+        var alpha = hovered ? 1f : 0.8f;
+        var thickness = hovered ? 2f : 1.5f;
+        dl.AddLine(new Vector2(pos.X, lineY), new Vector2(pos.X + Px(12), lineY), U32(Gold, alpha), thickness);
+        if (folded == true)
+            dl.AddLine(new Vector2(pos.X + Px(6), lineY - Px(6)), new Vector2(pos.X + Px(6), lineY + Px(6)), U32(Gold, alpha), thickness);
         ImGui.SetCursorScreenPos(new Vector2(pos.X + Px(18), pos.Y));
         if (icon is { } glyph)
         {
@@ -294,6 +358,7 @@ public static class Theme
             ImGui.SetCursorPosY(ImGui.GetCursorPosY() - ImGui.GetStyle().ItemSpacing.Y + gap); // from the title to what follows
         else
             ImGui.Dummy(new Vector2(0, Px(1)));
+        return clicked;
     }
 
     /// <summary>Muted explanation text, wrapped to the available width.</summary>
@@ -361,6 +426,45 @@ public static class Theme
     }
 
     /// <summary>A button showing only a FontAwesome glyph, with a tooltip.</summary>
+    // Row tops of each table, this frame and the last (screen y by row index): a row's height is the gap to the next.
+    private sealed class RowTops
+    {
+        public int Frame;
+        public Dictionary<int, float> Current = new();
+        public Dictionary<int, float> Last = new();
+    }
+
+    private static readonly Dictionary<uint, RowTops> TableRows = new();
+
+    /// <summary>
+    /// Call right after ImGui.TableNextRow(): lights the row under the mouse, to follow one line across the columns.
+    /// The row's height is taken from the last frame (the gap to the next row's top).
+    /// </summary>
+    public static void RowHover()
+    {
+        var key = ImGui.GetID("##rowhover");
+        if (!TableRows.TryGetValue(key, out var rows))
+            TableRows[key] = rows = new RowTops();
+        var frame = ImGui.GetFrameCount();
+        if (rows.Frame != frame)
+        {
+            (rows.Last, rows.Current) = (rows.Current, rows.Last);
+            rows.Current.Clear();
+            rows.Frame = frame;
+        }
+
+        var index = ImGui.TableGetRowIndex();
+        var top = ImGui.GetCursorScreenPos().Y;
+        rows.Current[index] = top;
+
+        var height = rows.Last.TryGetValue(index, out var lastTop) && rows.Last.TryGetValue(index + 1, out var nextTop) && nextTop > lastTop
+                         ? nextTop - lastTop
+                         : ImGui.GetFrameHeight();
+        var mouse = ImGui.GetMousePos().Y;
+        if (ImGui.IsWindowHovered() && mouse >= top && mouse < top + height)
+            ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg1, U32(Crystal, 0.14f));
+    }
+
     /// <summary>Width of an <see cref="IconButton"/>: its glyph in the icon font, its padding and its border.</summary>
     public static float IconButtonWidth(FontAwesomeIcon icon)
     {
@@ -439,7 +543,10 @@ public static class Theme
     {
         var color = accent ?? Gold;
         on |= accent is not null;
-        var size = ImGui.CalcTextSize(label) + Px(new Vector2(20, 8));
+        // "Text##id": the id keeps chips with the same text apart but is not shown.
+        var cut = label.IndexOf("##", StringComparison.Ordinal);
+        var text = cut >= 0 ? label[..cut] : label;
+        var size = ImGui.CalcTextSize(text) + Px(new Vector2(20, 8));
         var pos = ImGui.GetCursorScreenPos();
         var clicked = ImGui.InvisibleButton($"##chip{label}", size);
         var hovered = ImGui.IsItemHovered();
@@ -464,7 +571,7 @@ public static class Theme
             dl.AddRectFilled(pos, max, U32(hovered ? SurfaceHover : Surface), rounding);
         }
 
-        dl.AddText(pos + Px(new Vector2(10, 4)), U32(on ? Lighten(color, 0.4f) : TextMuted), label);
+        dl.AddText(pos + Px(new Vector2(10, 4)), U32(on ? Lighten(color, 0.4f) : TextMuted), text);
         return clicked;
     }
 

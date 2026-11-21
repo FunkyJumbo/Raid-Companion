@@ -49,9 +49,75 @@ public sealed class MitigationPlan
 
     public List<MitigationRow> Rows { get; set; } = [];
 
-    /// <summary>The role (and job) of a column, from its name.</summary>
+    /// <summary>
+    /// The role of each column, chosen in the composition (Tank, Healer, DPS: <see cref="PlanRole.Melee"/> stands for any
+    /// DPS); missing or <see cref="PlanRole.Any"/>: read from the column's name (an imported "Scholar", "Tank 1 (MT)").
+    /// </summary>
+    public List<PlanRole> ColumnRoles { get; set; } = [];
+
+    /// <summary>The tabs of the plan (one per phase...), in order; empty: a single page.</summary>
+    public List<string> Tabs { get; set; } = [];
+
+    /// <summary>The role (and job) of a column: chosen in the composition, else from its name.</summary>
     public (PlanRole Role, string Job) RoleOf(int column) =>
-        column < Columns.Count ? MitigationCatalog.RoleOf(Columns[column]) : (PlanRole.Any, string.Empty);
+        column < ColumnRoles.Count && ColumnRoles[column] != PlanRole.Any ? (ColumnRoles[column], string.Empty)
+        : column < Columns.Count ? MitigationCatalog.RoleOf(Columns[column])
+        : (PlanRole.Any, string.Empty);
+
+    /// <summary>The tab a row is in: its own when the plan has it, else the first one ("" without tabs).</summary>
+    public string TabOf(MitigationRow row) => Tabs.Count == 0 ? string.Empty : Tabs.Contains(row.Tab) ? row.Tab : Tabs[0];
+
+    /// <summary>A new position of the composition, named after its role: MT, OT, then T3...; H1, H2...; D1...; Extra.</summary>
+    public void AddColumn(PlanRole role)
+    {
+        var name = NameFor(role, -1);
+        while (ColumnRoles.Count < Columns.Count)
+            ColumnRoles.Add(PlanRole.Any);
+        Columns.Add(name);
+        ColumnRoles.Add(role);
+    }
+
+    /// <summary>Gives a position another role, and the name that goes with it.</summary>
+    public void SetRole(int column, PlanRole role)
+    {
+        if (column < 0 || column >= Columns.Count)
+            return;
+        while (ColumnRoles.Count < Columns.Count)
+            ColumnRoles.Add(PlanRole.Any);
+        ColumnRoles[column] = role;
+        Columns[column] = NameFor(role, column);
+    }
+
+    // The name of a position of this role, numbered after the other positions of the role (not counting this one).
+    private string NameFor(PlanRole role, int except)
+    {
+        bool Same(int c) => MitigationCatalog.IsDps(role) ? MitigationCatalog.IsDps(RoleOf(c).Role) : RoleOf(c).Role == role;
+        var count = Enumerable.Range(0, Columns.Count).Count(c => c != except && Same(c));
+        return role switch
+        {
+            PlanRole.Tank => count switch { 0 => "MT", 1 => "OT", _ => $"T{count + 1}" },
+            PlanRole.Healer => $"H{count + 1}",
+            PlanRole.Melee or PlanRole.Ranged or PlanRole.Caster => $"D{count + 1}",
+            _ => count == 0 ? "Extra" : $"Extra {count + 1}",
+        };
+    }
+
+    /// <summary>Removes a position, with what each row had in it.</summary>
+    public void RemoveColumn(int column)
+    {
+        if (column < 0 || column >= Columns.Count)
+            return;
+        Columns.RemoveAt(column);
+        if (column < ColumnRoles.Count)
+            ColumnRoles.RemoveAt(column);
+        foreach (var row in Rows)
+        {
+            if (column < row.Cells.Count)
+                row.Cells.RemoveAt(column);
+            if (column < row.Picks.Count)
+                row.Picks.RemoveAt(column);
+        }
+    }
 
     /// <summary>The skills of a row's column (an empty list, not stored, when it has none).</summary>
     public static List<PlannedAction> Picks(MitigationRow row, int column) => column < row.Picks.Count ? row.Picks[column] : [];
@@ -104,6 +170,12 @@ public sealed class MitigationRow
     /// <summary>The pre-pull: skills used before the pull, each at its time (seconds before the pull, negative).</summary>
     public bool Prepull { get; set; }
 
+    /// <summary>A separator: a line across the plan (a limit cut, an add phase...), with <see cref="Name"/> as its label (may be empty).</summary>
+    public bool Separator { get; set; }
+
+    /// <summary>The tab the row is in (see <see cref="MitigationPlan.Tabs"/>).</summary>
+    public string Tab { get; set; } = string.Empty;
+
     /// <summary>Pre-pull: when its skills are used, in seconds before the pull (8 for 8 s before); null when not set.</summary>
     public double? PrepullSeconds { get; set; }
 
@@ -120,7 +192,8 @@ public sealed class PlannedAction
 }
 
 /// <summary>A skill of your column of the plan not used in time for its cast (AtSeconds: when the cast landed).</summary>
-public sealed record PlanMiss(double AtSeconds, string Cast, uint ActionId, string Action);
+/// <param name="Used">Used in time (the check passed); false: missed.</param>
+public sealed record PlanMiss(double AtSeconds, string Cast, uint ActionId, string Action, bool Used = false);
 
 /// <summary>Plans from a spreadsheet, links to a pull's casts, and where a pull in progress is in a plan. Pure logic.</summary>
 public static class MitigationPlans
@@ -426,6 +499,8 @@ public static class MitigationPlans
         var linked = 0;
         foreach (var row in plan.Rows)
         {
+            if (row.Separator || row.Prepull)
+                continue; // not a cast
             var name = row.Name.Trim();
             used[name] = used.GetValueOrDefault(name) + 1;
             if (row.ActionId != 0)
@@ -487,6 +562,12 @@ public static class MitigationPlans
     /// <param name="family">The ids that count as an action (all its levels).</param>
     public static List<PlanMiss> Misses(MitigationPlan plan, int column, IReadOnlyList<BossCast> casts,
                                         IReadOnlyList<(uint ActionId, double At)> uses, Func<uint, IReadOnlyCollection<uint>> family,
+                                        double until, Func<uint, string> nameOf, Func<uint, bool>? counts = null) =>
+        Checks(plan, column, casts, uses, family, until, nameOf, counts).Where(c => !c.Used).ToList();
+
+    /// <summary>Every check of your column (see <see cref="Misses"/>): each skill for each cast judged, used in time or not.</summary>
+    public static List<PlanMiss> Checks(MitigationPlan plan, int column, IReadOnlyList<BossCast> casts,
+                                        IReadOnlyList<(uint ActionId, double At)> uses, Func<uint, IReadOnlyCollection<uint>> family,
                                         double until, Func<uint, string> nameOf, Func<uint, bool>? counts = null)
     {
         var misses = new List<PlanMiss>();
@@ -521,8 +602,7 @@ public static class MitigationPlans
                 {
                     var at = MitigationRow.PrepullAt(row, p);
                     var from = at is { } o ? o - 5 : -60;
-                    if (!Used(p.ActionId, from, After))
-                        misses.Add(new PlanMiss(at ?? 0, row.Name, p.ActionId, nameOf(p.ActionId)));
+                    misses.Add(new PlanMiss(at ?? 0, row.Name, p.ActionId, nameOf(p.ActionId), Used(p.ActionId, from, After)));
                 }
 
                 continue;
@@ -530,8 +610,8 @@ public static class MitigationPlans
 
             if (row.ActionId == 0 || !landed.TryGetValue((row.ActionId, Math.Max(1, row.Occurrence)), out var hit) || hit + After > until)
                 continue;
-            foreach (var p in picks.Where(p => !Used(p.ActionId, hit - Before, hit + After)))
-                misses.Add(new PlanMiss(hit, row.Name, p.ActionId, nameOf(p.ActionId)));
+            foreach (var p in picks)
+                misses.Add(new PlanMiss(hit, row.Name, p.ActionId, nameOf(p.ActionId), Used(p.ActionId, hit - Before, hit + After)));
         }
 
         return misses;

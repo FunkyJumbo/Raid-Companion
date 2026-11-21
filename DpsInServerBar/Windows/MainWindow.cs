@@ -76,6 +76,14 @@ public sealed partial class MainWindow : Window
             historyFilter = string.Empty;
     }
 
+    /// <summary>
+    /// A pull's fight as the windows show it: "The Unmaking EX (Enuo)", "AAC Heavyweight M4 (M12S)", "The Epic of
+    /// Alexander (TEA)"; the other kinds of content by their boss (or zone).
+    /// </summary>
+    private string FightName(PullRecord pull) =>
+        plugin.ContentCategories.DisplayName(pull.TerritoryId, Progression.Encounter(pull))
+        ?? (pull.Title.Length > 0 ? pull.Title : pull.Zone);
+
     public void ShowHistory()
     {
         IsOpen = true;
@@ -159,6 +167,7 @@ public sealed partial class MainWindow : Window
     public override void Draw()
     {
         shot.Step();
+        personalShown = plugin.Configuration.PersonalElements;
         Theme.BlurBehind();
         Theme.TabStrip("main", ref selectedTab,
                        (FontAwesomeIcon.Bolt, Loc.T("Live")), (FontAwesomeIcon.History, Loc.T("History")), (FontAwesomeIcon.ChartLine, Loc.T("Progression")));

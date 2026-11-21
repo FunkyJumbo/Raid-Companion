@@ -317,12 +317,33 @@ public sealed class OpenerWindow : Window
 
         DrawControls(config, job, openers, opener);
         ImGui.Dummy(Theme.Px(new Vector2(0, 4)));
-        DrawTimeline(run);
+        DrawTimeline(run, scale: Math.Clamp(config.OpenerScale, 0.5f, 1.5f));
         ImGui.Dummy(Theme.Px(new Vector2(0, 2)));
         DrawStatus(run);
         if (!run.Started || run.Clock < 0)
             DrawReadiness(run);
         DrawNotes(opener);
+    }
+
+    // The size of the opener's boxes in this window: a chip opening the usual steps.
+    private static void DrawSizeChip(Configuration config)
+    {
+        if (Theme.Chip($"{Math.Round(config.OpenerScale * 100)}%##openersize", false))
+            ImGui.OpenPopup("##openersize");
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(Loc.T("Size of the opener's actions"));
+
+        using var popup = ImRaii.Popup("##openersize");
+        if (!popup)
+            return;
+        foreach (var percent in new[] { 50, 75, 100, 125, 150 })
+        {
+            if (ImGui.Selectable($"{percent}%", Math.Abs(config.OpenerScale * 100 - percent) < 0.5f))
+            {
+                config.OpenerScale = percent / 100f;
+                config.Save();
+            }
+        }
     }
 
     private void DrawControls(Configuration config, string job, List<OpenerDefinition> openers, OpenerDefinition opener)
@@ -336,7 +357,7 @@ public sealed class OpenerWindow : Window
             {
                 foreach (var o in openers)
                 {
-                    if (ImGui.Selectable(Loc.T(o.Name), o == opener))
+                    if (ImGui.Selectable($"{Loc.T(o.Name)}##{o.Id}", o == opener))
                     {
                         config.OpenerSelected[job] = o.Id;
                         config.Save();
@@ -344,6 +365,9 @@ public sealed class OpenerWindow : Window
                 }
             }
         }
+
+        ImGui.SameLine();
+        DrawSizeChip(config);
 
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(opener.Source);

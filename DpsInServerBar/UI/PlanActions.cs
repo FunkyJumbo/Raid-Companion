@@ -29,6 +29,60 @@ public static class PlanActions
         return families!.TryGetValue(actionId, out var f) ? f : [actionId];
     }
 
+    /// <summary>The level cap of the game, for a fight that does not sync your level.</summary>
+    public const int MaxLevel = 100;
+
+    private static readonly Dictionary<uint, int> levels = new();
+    private static readonly Dictionary<uint, int> fightLevels = new();
+
+    /// <summary>The level an action is learned at (0 when unknown).</summary>
+    public static int LevelOf(uint actionId)
+    {
+        if (!levels.TryGetValue(actionId, out var level))
+        {
+            level = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Action>().TryGetRow(actionId, out var row) ? row.ClassJobLevel : 0;
+            levels[actionId] = level;
+        }
+
+        return level;
+    }
+
+    /// <summary>The level of a fight: its duty's level sync, else the level cap.</summary>
+    public static int FightLevel(uint territory)
+    {
+        if (!fightLevels.TryGetValue(territory, out var level))
+        {
+            level = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>().TryGetRow(territory, out var row)
+                    && row.ContentFinderCondition.ValueNullable is { } duty && duty.ClassJobLevelSync > 0
+                        ? duty.ClassJobLevelSync
+                        : MaxLevel;
+            fightLevels[territory] = level;
+        }
+
+        return level;
+    }
+
+    /// <summary>
+    /// The version of an action at a level: of its family (all its levels), the highest one learned by then; 0 when not
+    /// learned yet (Guardian at 80: Sentinel; Aurora at 80: none).
+    /// </summary>
+    public static uint AtLevel(uint actionId, int level)
+    {
+        uint best = 0;
+        var bestLevel = -1;
+        foreach (var id in Family(actionId))
+        {
+            var learned = LevelOf(id);
+            if (learned <= level && learned > bestLevel)
+            {
+                best = id;
+                bestLevel = learned;
+            }
+        }
+
+        return best;
+    }
+
     private static readonly Dictionary<(PlanRole, string), HashSet<uint>> offered = new();
 
     /// <summary>The ids (all levels) of the skills a column offers for this role and job.</summary>

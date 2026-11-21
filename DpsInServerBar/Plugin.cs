@@ -84,8 +84,13 @@ public sealed class Plugin : IDalamudPlugin
         native.LocalActionUsed += Uptime.OnActionUsed;
         Combos = new ComboTracker(ObjectTable, JobGauges, combat, DataManager);
         native.LocalActionUsed += Combos.OnActionUsed;
+        native.LocalActionUsed += Actions.OnActionUsed;
+        native.LocalEffect += (type, id) =>
+        {
+            if (type == 2) // an item (a potion...)
+                Actions.OnItemUsed(id);
+        };
         PlanCheck = new PlanCheck(this);
-        native.LocalActionUsed += PlanCheck.OnActionUsed;
         native.LocalDamage += Combos.OnDamage;
         native.EnemyHit += FightLog.OnEnemyHit;
         Positionals = new PositionalTracker(ObjectTable, combat, DataManager, Log);
@@ -148,6 +153,9 @@ public sealed class Plugin : IDalamudPlugin
     public DotTracker Dots { get; }
     public ComboTracker Combos { get; }
     public PlanCheck PlanCheck { get; }
+
+    /// <summary>Your recent actions: the rotation of a pull, and what the mitigation plan checks.</summary>
+    public ActionLog Actions { get; } = new();
     public ContentCategories ContentCategories { get; }
     public FightCatalog Fights { get; }
     public OpenerTracker OpenerTracker { get; }
@@ -345,6 +353,8 @@ public sealed class Plugin : IDalamudPlugin
     private void OnFrameworkUpdate(IFramework framework)
     {
         combat.Update();
+        if (combat.Ended)
+            Actions.OnCombatEnded();
         Tracker.Tick();
         Uptime.Update();
         Gauges.Update();

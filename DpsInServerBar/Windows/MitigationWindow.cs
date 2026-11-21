@@ -31,8 +31,6 @@ public sealed class MitigationWindow : Window
     private bool messageIsError;
     private Guid? sourcePullId;
     private string castFilter = string.Empty;
-    private string columnsBuffer = string.Empty;
-    private string columnsFor = string.Empty;
 
     public MitigationWindow(Plugin plugin, MitigationPlanWindow planWindow) : base(Loc.T("Mitigation plans###DpsInServerBarMitigation"))
     {
@@ -80,6 +78,14 @@ public sealed class MitigationWindow : Window
     public override void PreDraw()
     {
         themeScope = Theme.Push();
+
+        // Editing: no wider than the editor (its last column would stretch). The list: as wide as wished.
+        var max = Editing() is { } plan ? MitigationTable.WindowWidthFor(EditorWidth(plan)) / Dalamud.Interface.Utility.ImGuiHelpers.GlobalScale : 5000;
+        SizeConstraints = new WindowSizeConstraints
+        {
+            MinimumSize = new Vector2(Math.Min(480, max), 300),
+            MaximumSize = new Vector2(max, 5000),
+        };
         shot.PreDraw();
     }
 
@@ -199,6 +205,21 @@ public sealed class MitigationWindow : Window
         DrawFightPopup("##importplan", Loc.T("Import the copied plan for:"), Import);
     }
 
+    // A copy of a plan, right after it, named "Name (1)", "(2)"... (the first number free).
+    private void Duplicate(MitigationPlan plan)
+    {
+        if (MitigationPlans.Import(MitigationPlans.Export(plan)) is not { } copy)
+            return;
+
+        var n = 1;
+        while (Config.MitigationPlans.Any(p => p.Name == $"{plan.Name} ({n})"))
+            n++;
+        copy.Name = $"{plan.Name} ({n})";
+        Config.MitigationPlans.Insert(Config.MitigationPlans.IndexOf(plan) + 1, copy);
+        Config.Save();
+        Say(Loc.F("Duplicated: {0}.", copy.Name), false);
+    }
+
     // The plans by fight (the fight in progress first), their name only; a fight searched shows all its plans.
     private void DrawList()
     {
@@ -217,11 +238,12 @@ public sealed class MitigationWindow : Window
         var style = ImGui.GetStyle();
         var buttons = ImGui.CalcTextSize(Loc.T("Show")).X + ImGui.CalcTextSize(Loc.T("Edit")).X
                       + (style.FramePadding.X + style.FrameBorderSize) * 4 + style.ItemSpacing.X * 2
+                      + Theme.IconButtonWidth(FontAwesomeIcon.Copy) + style.ItemSpacing.X
                       + Theme.IconButtonWidth(FontAwesomeIcon.Trash);
         using var list = ImRaii.Child("##planlist", new Vector2(-1, -1));
         foreach (var fight in fights)
         {
-            var encounter = fight.First().Encounter;
+            var encounter = plugin.ContentCategories.DisplayName(fight.Key, fight.First().Encounter) ?? fight.First().Encounter;
             var fightMatches = search.Length == 0 || encounter.Contains(search, StringComparison.OrdinalIgnoreCase);
             var shown = fight.Where(p => fightMatches || p.Name.Contains(search, StringComparison.OrdinalIgnoreCase)).ToList();
             if (shown.Count == 0)
@@ -254,6 +276,13 @@ public sealed class MitigationWindow : Window
                 ImGui.SameLine();
                 if (ImGui.Button(Loc.T("Edit")))
                     Edit(plan);
+                ImGui.SameLine();
+                if (Theme.IconButton("duplicateplan", FontAwesomeIcon.Copy, Loc.T("Duplicate this plan")))
+                {
+                    Duplicate(plan);
+                    break;
+                }
+
                 ImGui.SameLine();
                 using (ImRaii.Disabled(!ImGui.GetIO().KeyCtrl))
                 {
@@ -291,7 +320,7 @@ public sealed class MitigationWindow : Window
             ImGui.TextDisabled(Loc.T("No pull in the History yet."));
         foreach (var (territory, encounter, pulls) in fights.Take(40))
         {
-            if (ImGui.Selectable($"{encounter}##{territory}"))
+            if (ImGui.Selectable($"{plugin.ContentCategories.DisplayName(territory, encounter) ?? encounter}##{territory}"))
             {
                 picked(territory, encounter, pulls);
                 ImGui.CloseCurrentPopup();
@@ -349,35 +378,19 @@ public sealed class MitigationWindow : Window
             plan.Name = name;
         SaveWhenDone();
 
-        ImGui.SameLine(0, Theme.Px(20));
-        if (columnsFor != plan.Id)
-        {
-            columnsFor = plan.Id;
-            columnsBuffer = string.Join(", ", plan.Columns);
-        }
-
-        ImGui.SetNextItemWidth(Theme.Px(360));
-        ImGui.InputText(Loc.T("Columns"), ref columnsBuffer, 300);
-        if (ImGui.IsItemDeactivatedAfterEdit())
-        {
-            var columns = columnsBuffer.Split(',').Select(c => c.Trim()).Where(c => c.Length > 0).ToList();
-            if (columns.Count > 0)
-                plan.Columns = columns;
-            columnsBuffer = string.Join(", ", plan.Columns);
-            Config.Save();
-        }
-
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Who does what, separated by commas: roles (MT, OT, H1, H2, M1, M2, R1, R2) or jobs. The role of a column decides the skills offered in its cells."));
+        DrawComposition(plan);
 
         var source = SourcePull(plan);
         var casts = source is null ? [] : MitigationPlans.Numbered(source.BossCasts);
 
-        var sideWidth = Theme.Px(300);
+        var sideWidth = SideWidth;
         using (var rows = ImRaii.Child("##planrows", new Vector2(-sideWidth - ImGui.GetStyle().ItemSpacing.X, -1)))
         {
             if (rows)
+            {
+                editTab = table.DrawTabs(plan, editable: true);
                 DrawRowsEditor(plan, casts);
+            }
         }
 
         ImGui.SameLine();
@@ -403,9 +416,9 @@ public sealed class MitigationWindow : Window
             if (editTable)
             {
                 ImGui.TableSetupScrollFreeze(2, 1);
-                ImGui.TableSetupColumn(Loc.T("Part"), ImGuiTableColumnFlags.WidthFixed, Theme.Px(90));
-                ImGui.TableSetupColumn(Loc.T("Cast"), ImGuiTableColumnFlags.WidthFixed, Theme.Px(140));
-                ImGui.TableSetupColumn(Loc.T("Timeline cast"), ImGuiTableColumnFlags.WidthFixed, Theme.Px(150));
+                ImGui.TableSetupColumn(Loc.T("Note"), ImGuiTableColumnFlags.WidthFixed, NoteWidth);
+                ImGui.TableSetupColumn(Loc.T("Cast"), ImGuiTableColumnFlags.WidthFixed, EditCastWidth);
+                ImGui.TableSetupColumn(Loc.T("Timeline cast"), ImGuiTableColumnFlags.WidthFixed, LinkWidth);
                 for (var c = 0; c < plan.Columns.Count; c++)
                     ImGui.TableSetupColumn($"{plan.Columns[c]}##ecol{c}", ImGuiTableColumnFlags.WidthFixed, MitigationTable.CellWidth);
                 ImGui.TableSetupColumn("##rowtools", ImGuiTableColumnFlags.WidthFixed, ToolsWidth());
@@ -413,19 +426,39 @@ public sealed class MitigationWindow : Window
 
                 var move = (From: -1, To: -1);
                 var remove = -1;
-                for (var i = 0; i < plan.Rows.Count; i++)
+                var inTab = Enumerable.Range(0, plan.Rows.Count).Where(r => plan.TabOf(plan.Rows[r]) == editTab).ToList();
+                for (var k = 0; k < inTab.Count; k++)
                 {
+                    var i = inTab[k];
                     var row = plan.Rows[i];
                     using var id = ImRaii.PushId(i);
+
+                    if (row.Separator)
+                    {
+                        DrawSeparatorRow(plan, row);
+                        if (DrawRowTools(k, inTab, ref move))
+                            remove = i;
+                        continue;
+                    }
+
+                    // Where a part of the fight starts ("P1: Living Liquid", the gold line of the plan): its title, to
+                    // rename (every row of the part) or clear.
+                    if (row.Phase.Length > 0 && (i == 0 || plan.Rows[i - 1].Phase != row.Phase))
+                        DrawPartTitle(plan, i);
+
                     ImGui.TableNextRow();
+                    Theme.RowHover();
 
                     ImGui.TableNextColumn();
                     var rowTop = ImGui.GetCursorScreenPos().Y;
-                    var phase = row.Phase;
+                    // The row's note: shown in the "?" next to its cast in the plan.
+                    var note = row.Note;
                     ImGui.SetNextItemWidth(-1);
-                    if (ImGui.InputText("##phase", ref phase, 80))
-                        row.Phase = phase;
+                    if (ImGui.InputText("##note", ref note, 300))
+                        row.Note = note;
                     SaveWhenDone();
+                    if (ImGui.IsItemHovered() && row.Note.Length > 0)
+                        ImGui.SetTooltip(row.Note);
 
                     ImGui.TableNextColumn();
                     var cast = row.Name;
@@ -438,18 +471,13 @@ public sealed class MitigationWindow : Window
                     if (row.Prepull)
                         DrawPrepullTime(row);
                     else
+                    {
+                        linkedPlan = plan;
                         DrawLinkButton(row, casts);
+                    }
 
                     table.DrawCells(plan, row, i, rowTop, -1);
-
-                    ImGui.TableNextColumn();
-                    if (Theme.IconButton("up", FontAwesomeIcon.ArrowUp, Loc.T("Move up")) && i > 0)
-                        move = (i, i - 1);
-                    ImGui.SameLine(0, Theme.Px(2));
-                    if (Theme.IconButton("down", FontAwesomeIcon.ArrowDown, Loc.T("Move down")) && i < plan.Rows.Count - 1)
-                        move = (i, i + 1);
-                    ImGui.SameLine(0, Theme.Px(2));
-                    if (Theme.IconButton("remove", FontAwesomeIcon.Times, Loc.T("Remove this row"), Theme.Bad))
+                    if (DrawRowTools(k, inTab, ref move))
                         remove = i;
                 }
 
@@ -469,7 +497,7 @@ public sealed class MitigationWindow : Window
 
         if (ImGui.Button(Loc.T("Add a row")))
         {
-            plan.Rows.Add(new MitigationRow { Phase = plan.Rows.LastOrDefault()?.Phase ?? string.Empty });
+            plan.Rows.Add(new MitigationRow { Phase = plan.Rows.LastOrDefault()?.Phase ?? string.Empty, Tab = editTab });
             Config.Save();
         }
 
@@ -480,13 +508,205 @@ public sealed class MitigationWindow : Window
             var index = plan.Rows.FindLastIndex(r => r.Prepull) + 1;
             plan.Rows.Insert(index, new MitigationRow
             {
-                Prepull = true, Name = Loc.T("Pre-pull"), Phase = plan.Rows.FirstOrDefault()?.Phase ?? string.Empty,
+                Prepull = true, Name = Loc.T("Pre-pull"), Phase = plan.Rows.FirstOrDefault()?.Phase ?? string.Empty, Tab = editTab,
             });
             Config.Save();
         }
 
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(Loc.T("A row for the skills used before the pull, with when they are used (8 s before...). One row per time."));
+
+        ImGui.SameLine();
+        if (ImGui.Button(Loc.T("Add a separator")))
+        {
+            plan.Rows.Add(new MitigationRow { Separator = true, Phase = plan.Rows.LastOrDefault()?.Phase ?? string.Empty, Tab = editTab });
+            Config.Save();
+        }
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(Loc.T("A line across the plan (a limit cut, an add phase, or the phases on one page), with a word on it if you like. Move it with the arrows."));
+    }
+
+    // The tab the editor shows (rows added go in it).
+    private string editTab = string.Empty;
+
+    // A separator in the editor: its label (may be empty), the line shown under it.
+    private void DrawSeparatorRow(MitigationPlan plan, MitigationRow row)
+    {
+        ImGui.TableNextRow();
+        Theme.RowHover();
+        ImGui.TableNextColumn();
+        ImGui.TextColored(Theme.GoldBright, Loc.T("Separator"));
+        ImGui.TableNextColumn();
+        var label = row.Name;
+        ImGui.SetNextItemWidth(-1);
+        using (ImRaii.PushColor(ImGuiCol.Text, Theme.GoldBright))
+        {
+            if (ImGui.InputTextWithHint("##separator", Loc.T("Label (optional)"), ref label, 60))
+                row.Name = label;
+        }
+
+        SaveWhenDone();
+        ImGui.TableNextColumn();
+        var pos = ImGui.GetCursorScreenPos();
+        var y = pos.Y + ImGui.GetFrameHeight() / 2;
+        ImGui.GetWindowDrawList().AddLine(new Vector2(pos.X, y), new Vector2(pos.X + ImGui.GetContentRegionAvail().X, y), Theme.U32(Theme.Gold, 0.6f), Theme.Px(1.5f));
+        for (var c = 0; c < plan.Columns.Count; c++)
+            ImGui.TableNextColumn();
+    }
+
+    // The arrows and the cross of a row: moved within its tab, or removed (true).
+    private static bool DrawRowTools(int k, List<int> inTab, ref (int From, int To) move)
+    {
+        ImGui.TableNextColumn();
+        if (Theme.IconButton("up", FontAwesomeIcon.ArrowUp, Loc.T("Move up")) && k > 0)
+            move = (inTab[k], inTab[k - 1]);
+        ImGui.SameLine(0, Theme.Px(2));
+        if (Theme.IconButton("down", FontAwesomeIcon.ArrowDown, Loc.T("Move down")) && k < inTab.Count - 1)
+            move = (inTab[k], inTab[k + 1]);
+        ImGui.SameLine(0, Theme.Px(2));
+        return Theme.IconButton("remove", FontAwesomeIcon.Times, Loc.T("Remove this row"), Theme.Bad);
+    }
+
+    // The composition of the group: one chip per position (its role and name, to change or remove), and "+" to add one.
+    private void DrawComposition(MitigationPlan plan)
+    {
+        ImGui.SameLine(0, Theme.Px(20));
+        ImGui.TextColored(Theme.TextMuted, Loc.T("Composition"));
+        Theme.HelpMarker(Loc.T("The positions of the plan, by role: tanks get the tank skills, healers the healer ones, DPS every DPS skill. Any composition: two tanks and six DPS, three healers... Click a position to change its role or name, or remove it."));
+        for (var c = 0; c < plan.Columns.Count; c++)
+        {
+            using var id = ImRaii.PushId($"pos{c}");
+            ImGui.SameLine(0, Theme.Px(4));
+            var role = plan.RoleOf(c).Role;
+            var color = role switch
+            {
+                PlanRole.Tank => Theme.Tank,
+                PlanRole.Healer => Theme.Healer,
+                PlanRole.Melee or PlanRole.Ranged or PlanRole.Caster => Theme.Dps,
+                _ => Theme.TextMuted,
+            };
+            if (Theme.Chip(plan.Columns[c], false, accent: color))
+            {
+                positionName = plan.Columns[c];
+                ImGui.OpenPopup("##position");
+            }
+
+            DrawPositionMenu(plan, c);
+        }
+
+        ImGui.SameLine(0, Theme.Px(4));
+        if (Theme.Chip("+", false))
+            ImGui.OpenPopup("##addposition");
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(Loc.T("Add a position"));
+
+        using var popup = ImRaii.Popup("##addposition");
+        if (!popup)
+            return;
+        foreach (var (role, label) in RoleChoices)
+        {
+            if (ImGui.Selectable(label))
+            {
+                plan.AddColumn(role);
+                Config.Save();
+            }
+        }
+    }
+
+    private static (PlanRole Role, string Label)[] RoleChoices =>
+        [(PlanRole.Tank, Loc.T("Tank")), (PlanRole.Healer, Loc.T("Healer")), (PlanRole.Melee, Loc.T("DPS")), (PlanRole.Any, Loc.T("Other"))];
+
+    private string positionName = string.Empty;
+
+    // A position: its role, its name, or removed (Ctrl held).
+    private void DrawPositionMenu(MitigationPlan plan, int column)
+    {
+        using var popup = ImRaii.Popup("##position");
+        if (!popup)
+            return;
+
+        var current = plan.RoleOf(column).Role;
+        foreach (var (role, label) in RoleChoices)
+        {
+            var on = MitigationCatalog.IsDps(role) ? MitigationCatalog.IsDps(current) : current == role;
+            if (ImGui.RadioButton(label, on) && !on)
+            {
+                plan.SetRole(column, role);
+                positionName = plan.Columns[column];
+                Config.Save();
+            }
+
+            ImGui.SameLine();
+        }
+
+        ImGui.NewLine();
+        ImGui.SetNextItemWidth(Theme.Px(160));
+        if (ImGui.InputText(Loc.T("Name"), ref positionName, 30) && positionName.Trim().Length > 0)
+            plan.Columns[column] = positionName.Trim();
+        SaveWhenDone();
+
+        var ctrl = ImGui.GetIO().KeyCtrl;
+        if (ImGui.MenuItem(ctrl ? Loc.T("Remove this position") : Loc.T("Remove this position (hold Ctrl)"), false, ctrl))
+        {
+            RemoveColumn(plan, column);
+            ImGui.CloseCurrentPopup();
+        }
+    }
+
+    // A position removed: what the rows had in it goes, and your column and the jobs chosen follow the others' places.
+    private void RemoveColumn(MitigationPlan plan, int column)
+    {
+        plan.RemoveColumn(column);
+        if (Config.MitigationMyColumn.TryGetValue(plan.Id, out var mine))
+        {
+            if (mine == column)
+                Config.MitigationMyColumn.Remove(plan.Id);
+            else if (mine > column)
+                Config.MitigationMyColumn[plan.Id] = mine - 1;
+        }
+
+        var jobs = Config.MitigationColumnJobs.Where(j => j.Key.StartsWith(plan.Id + ":", StringComparison.Ordinal)).ToList();
+        foreach (var (key, job) in jobs)
+        {
+            Config.MitigationColumnJobs.Remove(key);
+            var c = int.Parse(key[(plan.Id.Length + 1)..], System.Globalization.CultureInfo.InvariantCulture);
+            if (c != column)
+                Config.MitigationColumnJobs[$"{plan.Id}:{(c > column ? c - 1 : c)}"] = job;
+        }
+
+        Config.Save();
+    }
+
+    // The title of the part starting at this row, on a line of its own: renamed or cleared for all the rows of the part.
+    private void DrawPartTitle(MitigationPlan plan, int first)
+    {
+        var old = plan.Rows[first].Phase;
+        ImGui.TableNextRow();
+        ImGui.TableNextColumn();
+        ImGui.TextColored(Theme.GoldBright, Loc.T("Part"));
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(Loc.T("A part of the fight (a gold line above its first cast in the plan). Clear it to remove the line."));
+
+        ImGui.TableNextColumn();
+        var title = old;
+        ImGui.SetNextItemWidth(-1);
+        using (ImRaii.PushColor(ImGuiCol.Text, Theme.GoldBright))
+            ImGui.InputText("##parttitle", ref title, 80);
+        if (ImGui.IsItemDeactivatedAfterEdit() && title != old)
+        {
+            for (var i = first; i < plan.Rows.Count && plan.Rows[i].Phase == old; i++)
+                plan.Rows[i].Phase = title.Trim();
+            Config.Save();
+        }
+
+        ImGui.TableNextColumn();
+        if (Theme.IconButton("clearpart", FontAwesomeIcon.Times, Loc.T("Remove this part title"), Theme.Bad))
+        {
+            for (var i = first; i < plan.Rows.Count && plan.Rows[i].Phase == old; i++)
+                plan.Rows[i].Phase = string.Empty;
+            Config.Save();
+        }
     }
 
     // When the skills of a pre-pull row are used, in seconds before the pull.
@@ -501,6 +721,16 @@ public sealed class MitigationWindow : Window
             ImGui.SetTooltip(Loc.T("When the skills of this row are used: seconds before the pull."));
     }
 
+    private static float NoteWidth => Theme.Px(110);
+    private static float EditCastWidth => Theme.Px(140);
+    private static float LinkWidth => Theme.Px(150);
+    private static float SideWidth => Theme.Px(300);
+
+    // Width of the editor: its table of rows, then the casts of the pull on the right.
+    private static float EditorWidth(MitigationPlan plan) =>
+        MitigationTable.TableWidth([NoteWidth, EditCastWidth, LinkWidth, .. Enumerable.Repeat(MitigationTable.CellWidth, plan.Columns.Count), ToolsWidth()])
+        + ImGui.GetStyle().ItemSpacing.X + SideWidth;
+
     // The three buttons of a row (up, down, remove), measured in the icon font.
     private static float ToolsWidth()
     {
@@ -509,6 +739,9 @@ public sealed class MitigationWindow : Window
         return new[] { FontAwesomeIcon.ArrowUp, FontAwesomeIcon.ArrowDown, FontAwesomeIcon.Times }
                    .Sum(i => ImGui.CalcTextSize(i.ToIconString()).X + padding) + Theme.Px(2) * 2 + Theme.Px(4);
     }
+
+    // The plan whose row is being linked (to leave out the casts its other rows have).
+    private MitigationPlan? linkedPlan;
 
     private void DrawLinkButton(MitigationRow row, List<(BossCast Cast, int Occurrence)> casts)
     {
@@ -535,7 +768,10 @@ public sealed class MitigationWindow : Window
         using var list = ImRaii.Child("##linklist", new Vector2(Theme.Px(320), Theme.Px(300)));
         foreach (var (cast, occurrence) in Filtered(casts))
         {
-            if (ImGui.Selectable(CastLabel(cast, occurrence), row.ActionId == cast.ActionId && row.Occurrence == occurrence))
+            // A cast already in another row of the plan cannot be linked again.
+            var mine = row.ActionId == cast.ActionId && row.Occurrence == occurrence;
+            var taken = !mine && linkedPlan?.Rows.Any(r => r.ActionId == cast.ActionId && r.Occurrence == occurrence) == true;
+            if (ImGui.Selectable(CastLabel(cast, occurrence), mine, taken ? ImGuiSelectableFlags.Disabled : ImGuiSelectableFlags.None))
             {
                 MitigationPlans.Link(row, cast, occurrence);
                 if (row.Name.Length == 0)
@@ -587,15 +823,14 @@ public sealed class MitigationWindow : Window
 
         foreach (var (cast, occurrence) in Filtered(casts))
         {
+            // Each attack once in the plan.
             var inPlan = plan.Rows.Any(r => r.ActionId == cast.ActionId && r.Occurrence == occurrence);
-            using (ImRaii.PushColor(ImGuiCol.Text, Theme.TextFaint, inPlan))
-            {
-                if (ImGui.Selectable($"{CastLabel(cast, occurrence)}##{cast.ActionId}-{occurrence}"))
-                    AddRow(plan, cast, occurrence);
-            }
+            if (ImGui.Selectable($"{CastLabel(cast, occurrence)}##{cast.ActionId}-{occurrence}", false,
+                                 inPlan ? ImGuiSelectableFlags.Disabled : ImGuiSelectableFlags.None))
+                AddRow(plan, cast, occurrence);
 
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(inPlan ? Loc.T("Already in the plan. Click to add it again.") : Loc.F("{0}, cast by {1}", GameNames.Action(cast.ActionId, cast.Action), cast.Caster));
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.SetTooltip(inPlan ? Loc.T("Already in the plan.") : Loc.F("{0}, cast by {1}", GameNames.Action(cast.ActionId, cast.Action), cast.Caster));
         }
     }
 
@@ -609,6 +844,7 @@ public sealed class MitigationWindow : Window
         {
             Name = GameNames.Action(cast.ActionId, cast.Action),
             Phase = index > 0 ? plan.Rows[index - 1].Phase : string.Empty,
+            Tab = editTab,
         };
         MitigationPlans.Link(row, cast, occurrence);
         plan.Rows.Insert(index, row);

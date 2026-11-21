@@ -3,6 +3,19 @@
 <!-- One "## <version>" section per release. The Release workflow publishes the section of the tagged
      version as the GitHub release notes; the same notes go into pluginmaster.json (shown in Dalamud). -->
 
+## 1.0.9.0
+
+- History, Personal: your rotation in the pull, as a timeline of your GCDs, oGCDs and potions (pre-pull included), with zoom.
+- Mitigation plans: the group's composition (any roles), tabs (one per phase...), separators, a compact view of your position only, a duplicate button; each attack once per plan.
+- Personal: the mitigation plan shown like the positionals (each skill used in time out of planned), the skills of your plan among your mitigations, and a choice of the lines shown (Settings).
+- History timeline: the enemies' attacks on a lane of their own, with the mitigations up when each landed, a line following the mouse with its time, and a zoom.
+- Deaths: hovering one shows the vulnerabilities on the player, the party mitigation up and the mitigation on the player when they died.
+- Every section of Live and History can be hidden with a click on the dash before its title (a plus shows it again); the graph setting is gone.
+- Fights by their usual name: The Unmaking EX (Enuo), AAC Heavyweight M4 (M12S), The Epic of Alexander (TEA).
+- Opener: openers with the same name can be told apart, new ones get a number, a right click on the editor's list duplicates or deletes, and the full window has a size option.
+- Chat summary: the example in the settings shows the values ticked only.
+- Various UI changes and adjustments.
+
 ## 1.0.8.0
 
 - Glass effect for every theme (Settings > Appearance): frosted see-through windows, the game blurred behind them. On by default for new installs.

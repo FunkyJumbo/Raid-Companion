@@ -7,28 +7,17 @@ namespace DpsInServerBar.Tracking;
 
 /// <summary>
 /// Checks your mitigations against the plan you use for the fight (the active plan of the fight and your column in
-/// it): the skills of your column not used in time for their cast. Keeps your recent actions, those just before the
-/// pull included (for the pre-pull). Game thread only.
+/// it): the skills of your column not used in time for their cast, from your actions (<see cref="ActionLog"/>, the
+/// ones just before the pull included, for the pre-pull). Game thread only.
 /// </summary>
 public sealed class PlanCheck
 {
-    private const int MaxUses = 2000;
-
     private readonly Plugin plugin;
-    private readonly List<(DateTime At, uint ActionId)> uses = [];
     private DateTime nextRefresh;
     private PullInProgress? livePull;
     private IReadOnlyList<PlanMiss> live = [];
 
     public PlanCheck(Plugin plugin) => this.plugin = plugin;
-
-    /// <summary>One of your actions landed (from the action effect hook).</summary>
-    public void OnActionUsed(uint actionId)
-    {
-        if (uses.Count >= MaxUses)
-            uses.RemoveRange(0, MaxUses / 2);
-        uses.Add((DateTime.UtcNow, actionId));
-    }
 
     /// <summary>The plan used to check you in this fight, and your column in it (-1 when none is chosen).</summary>
     public (MitigationPlan? Plan, int Column) For(uint territory)
@@ -81,15 +70,13 @@ public sealed class PlanCheck
         if (plan is null || column < 0)
             return null;
 
-        var mine = uses.Where(u => u.At >= startUtc.AddSeconds(-90))
-                       .Select(u => (u.ActionId, (u.At - startUtc).TotalSeconds))
-                       .ToList();
+        var mine = plugin.Actions.Since(startUtc, before: 90).Where(u => !u.Item).Select(u => (u.ActionId, u.AtSeconds)).ToList();
         // Only the skills of the job played in your column: the one chosen for it, else your own.
         var job = plugin.Configuration.MitigationColumnJobs.TryGetValue($"{plan.Id}:{column}", out var chosen) ? chosen : plan.RoleOf(column).Job;
         if (job.Length == 0)
             job = plugin.Tracker.Latest?.You?.Job ?? string.Empty;
         var offered = job.Length > 0 && MitigationCatalog.RoleOfJob(job) != PlanRole.Any ? PlanActions.Offered(plan.RoleOf(column).Role, job) : null;
-        return MitigationPlans.Misses(plan, column, plugin.FightLog.CastsSince(startUtc), mine, PlanActions.Family, until,
+        return MitigationPlans.Checks(plan, column, plugin.FightLog.CastsSince(startUtc), mine, PlanActions.Family, until,
                                       id => GameNames.Action(id, $"#{id}"), offered is null ? null : offered.Contains);
     }
 }

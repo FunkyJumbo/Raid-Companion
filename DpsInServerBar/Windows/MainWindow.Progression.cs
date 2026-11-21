@@ -142,38 +142,42 @@ public sealed partial class MainWindow
 
         var causes = progressionStats.Causes;
 
-        Theme.SectionHeader(Loc.T("Wiped by"), FontAwesomeIcon.Skull);
-        var wipes = prog.Count(p => p.Outcome != PullOutcome.Kill);
-        ImGui.TextColored(Theme.TextMuted, wipes == 1 ? Loc.T("1 pull without a kill") : Loc.F("{0} pulls without a kill",wipes));
-        Theme.HelpMarker(Loc.T("For each wipe, the most common cause of death in its last 20 seconds (or its first death). Needs the deaths of the party, recorded since this version."));
-        if (causes.Count == 0)
+        if (Theme.Section(Loc.T("Wiped by"), FontAwesomeIcon.Skull, "prog.wipes"))
         {
-            Theme.Hint(Loc.T("No wipe with recorded deaths yet."));
-        }
-        else
-        {
-            var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.PadOuterX;
-            using var table = ImRaii.Table("##wipecauses", 3, flags);
-            if (table)
+            var wipes = prog.Count(p => p.Outcome != PullOutcome.Kill);
+            ImGui.TextColored(Theme.TextMuted, wipes == 1 ? Loc.T("1 pull without a kill") : Loc.F("{0} pulls without a kill",wipes));
+            Theme.HelpMarker(Loc.T("For each wipe, the most common cause of death in its last 20 seconds (or its first death). Needs the deaths of the party, recorded since this version."));
+            if (causes.Count == 0)
             {
-                ImGui.TableSetupColumn(Loc.T("Cause"), ImGuiTableColumnFlags.WidthStretch, 4f);
-                ImGui.TableSetupColumn(Loc.T("Wipes"), ImGuiTableColumnFlags.WidthFixed, ImGui.CalcTextSize(Loc.T("Wipes")).X + Theme.Px(8));
-                ImGui.TableSetupColumn(Loc.T("Last pull"), ImGuiTableColumnFlags.WidthFixed, ImGui.CalcTextSize(Loc.T("Last pull")).X + Theme.Px(8));
-                ImGui.TableHeadersRow();
-                foreach (var c in causes)
+                Theme.Hint(Loc.T("No wipe with recorded deaths yet."));
+            }
+            else
+            {
+                var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | Theme.FitTable | ImGuiTableFlags.PadOuterX;
+                using var table = ImRaii.Table("##wipecauses", 3, flags);
+                if (table)
                 {
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    ImGui.TextColored(Theme.Bad, c.Cause);
-                    ImGui.TableNextColumn();
-                    ImGui.TextUnformatted(c.Count.ToString());
-                    ImGui.TableNextColumn();
-                    ImGui.TextColored(Theme.TextMuted, $"#{c.Last}");
+                    ImGui.TableSetupColumn(Loc.T("Cause"), ImGuiTableColumnFlags.WidthFixed);
+                    ImGui.TableSetupColumn(Loc.T("Wipes"), ImGuiTableColumnFlags.WidthFixed, ImGui.CalcTextSize(Loc.T("Wipes")).X + Theme.Px(8));
+                    ImGui.TableSetupColumn(Loc.T("Last pull"), ImGuiTableColumnFlags.WidthFixed, ImGui.CalcTextSize(Loc.T("Last pull")).X + Theme.Px(8));
+                    ImGui.TableHeadersRow();
+                    foreach (var c in causes)
+                    {
+                        ImGui.TableNextRow();
+                        Theme.RowHover();
+                        ImGui.TableNextColumn();
+                        ImGui.TextColored(Theme.Bad, c.Cause);
+                        ImGui.TableNextColumn();
+                        ImGui.TextUnformatted(c.Count.ToString());
+                        ImGui.TableNextColumn();
+                        ImGui.TextColored(Theme.TextMuted, $"#{c.Last}");
+                    }
                 }
             }
         }
 
-        Theme.SectionHeader(Loc.T("Pull after pull"), FontAwesomeIcon.ChartLine);
+        if (!Theme.Section(Loc.T("Pull after pull"), FontAwesomeIcon.ChartLine, "prog.pulls"))
+            return;
         if (Theme.Chip(Loc.T("Per pull"), !progressionByTime))
             progressionByTime = false;
         ImGui.SameLine(0, Theme.Px(4));

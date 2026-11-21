@@ -196,6 +196,9 @@ public sealed partial class MainWindow
     {
         // The fights go by their instance (with the fight's name when the instance has two, e.g. a door boss); an
         // ultimate by its own name (its instance has a meaningless name, e.g. "Liminal Space").
+        var firstTerritory = pulls.Where(p => Progression.Encounter(p).Length > 0)
+                                  .GroupBy(Progression.Encounter, StringComparer.OrdinalIgnoreCase)
+                                  .ToDictionary(g => g.Key, g => g.First().TerritoryId, StringComparer.OrdinalIgnoreCase);
         var zoneOf = pulls.Where(p => Progression.Encounter(p).Length > 0)
                           .GroupBy(Progression.Encounter, StringComparer.OrdinalIgnoreCase)
                           .ToDictionary(g => g.Key,
@@ -205,6 +208,9 @@ public sealed partial class MainWindow
                                         StringComparer.OrdinalIgnoreCase);
         string Label(string title)
         {
+            // Unreal, extreme, savage and ultimate fights by their own name ("The Unmaking EX (Enuo)", "... (M12S)").
+            if (firstTerritory.TryGetValue(title, out var territory) && plugin.ContentCategories.DisplayName(territory, title) is { } shown)
+                return shown;
             if (!zoneOf.TryGetValue(title, out var zone))
                 return title;
             zone = char.ToUpperInvariant(zone[0]) + zone[1..];
@@ -365,8 +371,8 @@ public sealed partial class MainWindow
             }
 
             Text(Progression.IsUltimate(p.TerritoryId)
-                     ? $"{Progression.Encounter(p)} · {UltimateDefinitions.Label(p.TerritoryId, Progression.Phase(p))}"
-                     : p.Title.Length > 0 ? p.Title : p.Zone);
+                     ? $"{FightName(p)} · {UltimateDefinitions.Label(p.TerritoryId, Progression.Phase(p))}"
+                     : FightName(p));
             // In an ultimate, the time in the phase reached (the whole pull on hover).
             Text(NumberFormat.Duration(TimeSpan.FromSeconds(p.PhaseSeconds ?? p.DurationSeconds)), Theme.TextMuted);
             if (p.PhaseSeconds is not null && ImGui.IsItemHovered())

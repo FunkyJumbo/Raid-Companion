@@ -277,7 +277,7 @@ public sealed class ChatSummary : IDisposable
                            : plugin.Uptime.Snapshot()?.Phases.FirstOrDefault(p => p.Number == result.Number) is { AvailableSeconds: >= 5 } gcd
                                ? gcd.Uptime
                                : (double?)null;
-        if (phaseGcd is { } phaseUptime)
+        if (config.ChatSummaryElements.HasFlag(SummaryElement.Uptime) && phaseGcd is { } phaseUptime)
             parts.Add(() => sb.Append(Loc.F("GCD {0:0.0%}",phaseUptime)));
 
         // What killed you during this phase, if you died.

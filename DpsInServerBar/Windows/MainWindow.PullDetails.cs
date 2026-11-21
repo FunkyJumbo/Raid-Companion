@@ -25,20 +25,20 @@ public sealed partial class MainWindow
         var config = plugin.Configuration;
         var top = ImGui.GetCursorPosY();
 
-        ImGui.TextColored(Theme.GoldBright, pull.Title.Length > 0 ? pull.Title : pull.Zone);
+        ImGui.TextColored(Theme.GoldBright, FightName(pull));
         ImGui.SameLine();
         ImGui.TextColored(Theme.TextMuted, $"{pull.StartUtc.ToLocalTime():g}");
 
         DrawPullCards(pull, compare);
         DrawPullPersonal(pull, compare);
 
-        Theme.SectionHeader(Loc.T("Party"), FontAwesomeIcon.Users);
-        DrawCombatantTable(pull.Combatants);
+        if (Theme.Section(Loc.T("Party"), FontAwesomeIcon.Users, "pull.party"))
+            DrawCombatantTable(pull.Combatants);
 
         // Pulls recorded before deaths and failed mechanics were tracked have no GCD analysis either: nothing to say for them.
         if (pull.Gcd is not null)
         {
-            DrawDeaths(pull.PartyDeaths);
+            DrawDeaths(pull.PartyDeaths, pull.Mitigations, pull.Debuffs);
             if (pull.Mitigations.Count > 0)
                 DrawMitigations(pull.Mitigations);
             DrawMistakes(pull.Mistakes, timeline: true);
@@ -51,13 +51,12 @@ public sealed partial class MainWindow
             }
         }
 
-        if (!config.ShowGraph)
+        if (!Theme.Section(Loc.T("Graph"), FontAwesomeIcon.ChartLine, "pull.graph"))
         {
             detailsHeight = ImGui.GetCursorPosY() - top;
             return;
         }
 
-        Theme.SectionHeader(Loc.T("Graph"), FontAwesomeIcon.ChartLine);
         var window = config.GraphWindowSeconds;
         graph.DrawOptions(window);
 
@@ -159,36 +158,51 @@ public sealed partial class MainWindow
     /// <summary>
     /// Your own play in a pull, one foldable line each: the figures on the line, the detail inside.
     /// </summary>
+    // The lines of Personal the player wants (Settings), read by the static drawing below.
+    private static PersonalElement personalShown = PersonalElement.All;
+
     private static void DrawPullPersonal(PullRecord pull, PullRecord? compare)
     {
+        bool Shown(PersonalElement element) => personalShown.HasFlag(element);
         var role = JobRoles.Of(pull.Job);
-        var gauge = pull.Gcd is not null && GaugeTracker.Tracks(pull.Job);
-        var dots = pull.DotUptimes is { Count: > 0 } d && d[0].AvailableSeconds >= 5 ? d : null;
-        var heals = role == JobRole.Healer ? pull.Overheal.Where(h => JobRoles.Of(h.Job) == JobRole.Healer).ToList() : [];
-        var losses = DamageDownLoss.Of(pull);
-        var tank = role == JobRole.Tank;
-        if (pull.Uptime is null && !gauge && pull.Positionals.Count == 0 && pull.ComboMistakes.Count == 0 && pull.PlanMisses is null && dots is null
-            && heals.Count == 0 && !(tank && pull.TankSwaps.Count > 0) && pull.Mitigations.Count == 0 && losses.Count == 0)
+        var uptime = Shown(PersonalElement.Gcd) ? pull.Uptime : null;
+        var rotation = Shown(PersonalElement.Rotation) && pull.Rotation.Count > 0;
+        var gauge = Shown(PersonalElement.Gauge) && pull.Gcd is not null && GaugeTracker.Tracks(pull.Job);
+        var positionals = Shown(PersonalElement.Positionals) && pull.Positionals.Count > 0;
+        var combos = Shown(PersonalElement.RotationErrors) && pull.ComboMistakes.Count > 0;
+        var plan = Shown(PersonalElement.MitigationPlan) ? pull.PlanResults : null;
+        var dots = Shown(PersonalElement.Dots) && pull.DotUptimes is { Count: > 0 } d && d[0].AvailableSeconds >= 5 ? d : null;
+        var heals = Shown(PersonalElement.Overheal) && role == JobRole.Healer
+                        ? pull.Overheal.Where(h => JobRoles.Of(h.Job) == JobRole.Healer).ToList()
+                        : [];
+        var losses = Shown(PersonalElement.DamageLoss) ? DamageDownLoss.Of(pull) : [];
+        var mitigation = Shown(PersonalElement.Mitigation) && pull.Mitigations.Count > 0;
+        var tank = Shown(PersonalElement.TankSwaps) && role == JobRole.Tank;
+        if (uptime is null && !rotation && !gauge && !positionals && !combos && plan is null && dots is null
+            && heals.Count == 0 && !(tank && pull.TankSwaps.Count > 0) && !mitigation && losses.Count == 0)
             return;
 
-        Theme.SectionHeader(Loc.T("Personal"), FontAwesomeIcon.User);
-        if (pull.Uptime is { } uptime)
-            FoldGcd(pull, compare, uptime);
+        if (!Theme.Section(Loc.T("Personal"), FontAwesomeIcon.User, "pull.personal"))
+            return;
+        if (uptime is { } gcdUptime)
+            FoldGcd(pull, compare, gcdUptime);
+        if (rotation)
+            FoldRotation(pull);
         if (losses.Count > 0)
             FoldDamageLoss(pull, losses);
         if (gauge)
             FoldGauge(pull.GaugeWaste);
-        if (pull.Positionals.Count > 0)
+        if (positionals)
             FoldPositionals(pull.Positionals);
-        if (pull.ComboMistakes.Count > 0)
+        if (combos)
             FoldCombos(pull.ComboMistakes);
-        if (pull.PlanMisses is { } planMisses)
-            FoldPlanMisses(planMisses, pull.PlanName);
+        if (plan is not null)
+            FoldPlanMisses(plan, pull.PlanName);
         if (dots is not null)
             FoldDots(dots);
         if (heals.Count > 0)
             FoldOverheal(heals);
-        if (pull.Mitigations.Count > 0)
+        if (mitigation)
             FoldMitigations(pull.Mitigations.Where(m => m.IsYou).ToList());
         if (tank)
             FoldTankSwaps(pull.TankSwaps);
@@ -205,7 +219,8 @@ public sealed partial class MainWindow
     // A detail table in a foldable line: fixed-width columns get a width, the others stretch.
     private static ImRaii.TableDisposable DetailTable(string id, params (string Name, float Width)[] columns)
     {
-        var table = ImRaii.Table(id, columns.Length, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp);
+        // As wide as its content: a column with a width keeps it, the others fit what they show.
+        var table = ImRaii.Table(id, columns.Length, ImGuiTableFlags.RowBg | Theme.FitTable);
         if (!table)
             return table;
         foreach (var (name, width) in columns)
@@ -213,7 +228,7 @@ public sealed partial class MainWindow
             if (width > 0)
                 ImGui.TableSetupColumn(name, ImGuiTableColumnFlags.WidthFixed, Theme.Px(width));
             else
-                ImGui.TableSetupColumn(name, ImGuiTableColumnFlags.WidthStretch, -width);
+                ImGui.TableSetupColumn(name, ImGuiTableColumnFlags.WidthFixed);
         }
 
         ImGui.TableHeadersRow();
@@ -280,6 +295,7 @@ public sealed partial class MainWindow
                 foreach (var l in losses)
                 {
                     ImGui.TableNextRow();
+                    Theme.RowHover();
                     TimeCell(l.Start);
                     ImGui.TableNextColumn();
                     ImGui.TextColored(l.Revive ? Theme.Warn : Theme.Bad, l.Status);
@@ -367,6 +383,7 @@ public sealed partial class MainWindow
                     foreach (var w in waste)
                     {
                         ImGui.TableNextRow();
+                        Theme.RowHover();
                         IconCell(ActionIcons.OfGauge(w.Resource), w.Resource);
                         ImGui.TableNextColumn();
                         ImGui.TextColored(Theme.Warn, GaugeAmount(w));
@@ -417,6 +434,7 @@ public sealed partial class MainWindow
                 foreach (var u in missed)
                 {
                     ImGui.TableNextRow();
+                    Theme.RowHover();
                     TimeCell(u.AtSeconds);
                     IconCell(ActionIcons.OfAction(u.ActionId), GameNames.Action(u.ActionId, u.Action));
                     ImGui.TableNextColumn();
@@ -450,6 +468,7 @@ public sealed partial class MainWindow
                 foreach (var m in mistakes)
                 {
                     ImGui.TableNextRow();
+                    Theme.RowHover();
                     TimeCell(m.AtSeconds);
                     IconCell(ActionIcons.OfAction(m.ActionId), ComboMistakeName(m));
                     ImGui.TableNextColumn();
@@ -470,20 +489,23 @@ public sealed partial class MainWindow
 
         if (misses.Count == 0)
         {
-            Theme.Hint(Loc.T("Every skill of your column was used in time."));
+            Theme.Hint(Loc.T("Nothing of your column was checked in this pull."));
         }
         else
         {
-            using var table = DetailTable("##pplantable", (Loc.T("Time"), 60), (Loc.T("Skill"), -2), (Loc.T("Cast"), -3));
+            using var table = DetailTable("##pplantable", (Loc.T("Time"), 60), (Loc.T("Skill"), -2), (Loc.T("Cast"), -3), (Loc.T("Result"), -1));
             if (table)
             {
                 foreach (var m in misses)
                 {
                     ImGui.TableNextRow();
+                    Theme.RowHover();
                     TimeCell(m.AtSeconds);
                     IconCell(ActionIcons.OfAction(m.ActionId), GameNames.Action(m.ActionId, m.Action));
                     ImGui.TableNextColumn();
                     ImGui.TextColored(Theme.TextMuted, m.Cast);
+                    ImGui.TableNextColumn();
+                    ImGui.TextColored(m.Used ? Theme.Good : Theme.Bad, m.Used ? Loc.T("in time") : Loc.T("missed"));
                 }
             }
         }
@@ -491,23 +513,26 @@ public sealed partial class MainWindow
         ImGui.TreePop();
     }
 
-    // The count of misses (green "none" without any), then the icon of each skill missed and how many times.
-    private static void PlanMissesSummary(IReadOnlyList<PlanMiss> misses, string plan)
+    // Like the positionals: how many of the checks passed, then each skill with its uses in time out of those planned,
+    // green when all were, red otherwise.
+    private static void PlanMissesSummary(IReadOnlyList<PlanMiss> checks, string plan)
     {
-        if (misses.Count == 0)
+        if (checks.Count == 0)
         {
-            ImGui.TextColored(Theme.Good, Loc.T("none"));
+            ImGui.TextColored(Theme.TextFaint, Loc.T("nothing checked yet"));
         }
         else
         {
-            ImGui.TextColored(Theme.Bad, misses.Count.ToString());
-            foreach (var group in misses.GroupBy(m => m.ActionId).OrderByDescending(g => g.Count()))
+            var used = checks.Count(c => c.Used);
+            ImGui.TextColored(used == checks.Count ? Theme.Good : Theme.Bad, $"{used}/{checks.Count} ({(double)used / checks.Count:0%})");
+            foreach (var group in checks.GroupBy(m => m.ActionId))
             {
                 var list = group.ToList();
+                var inTime = list.Count(c => c.Used);
                 ImGui.SameLine(0, Theme.Px(10));
                 var hovered = ActionIcons.Draw(ActionIcons.OfAction(group.Key), ImGui.GetTextLineHeight());
                 ImGui.SameLine(0, Theme.Px(4));
-                ImGui.TextColored(Theme.Bad, $"×{list.Count}");
+                ImGui.TextColored(inTime == list.Count ? Theme.Good : Theme.Bad, $"{inTime}/{list.Count}");
                 if (hovered || ImGui.IsItemHovered())
                     ImGui.SetTooltip(string.Join("\n", list.Select(PlanMissText)));
             }
@@ -521,8 +546,11 @@ public sealed partial class MainWindow
     }
 
     private static string PlanMissText(PlanMiss m) =>
-        Loc.F("{0}  {1} not used for {2}", NumberFormat.Duration(TimeSpan.FromSeconds(Math.Max(0, m.AtSeconds))),
-              GameNames.Action(m.ActionId, m.Action), m.Cast);
+        m.Used
+            ? Loc.F("{0}  {1} used for {2}", NumberFormat.Duration(TimeSpan.FromSeconds(Math.Max(0, m.AtSeconds))),
+                    GameNames.Action(m.ActionId, m.Action), m.Cast)
+            : Loc.F("{0}  {1} not used for {2}", NumberFormat.Duration(TimeSpan.FromSeconds(Math.Max(0, m.AtSeconds))),
+                    GameNames.Action(m.ActionId, m.Action), m.Cast);
 
     /// <summary>One line with the skills of your column of the mitigation plan not used in time; hover for details.</summary>
     private static void DrawPlanMisses(IReadOnlyList<PlanMiss> misses, string plan)
@@ -530,7 +558,7 @@ public sealed partial class MainWindow
         ImGui.TextColored(Theme.TextMuted, Loc.T("Mitigation plan"));
         ImGui.SameLine(0, Theme.Px(6));
         PlanMissesSummary(misses, plan);
-        Theme.HelpMarker(Loc.T("The skills of your column of the active mitigation plan not used in time: between 15 s before the cast landed and 1 s after (the pre-pull: around its time). Choose your column and the plan in the Mitigation plans window."));
+        Theme.HelpMarker(Loc.T("The skills of your column of the active mitigation plan, each with how many times it was used in time out of those planned: between 15 s before the cast landed and 1 s after (the pre-pull: around its time). Green when all were, red otherwise; hover a skill for each cast. Choose your column and the plan in the Mitigation plans window."));
     }
 
     private static void FoldDots(IReadOnlyList<DotUptime> dots)
@@ -575,6 +603,7 @@ public sealed partial class MainWindow
                 foreach (var (dot, drop) in drops)
                 {
                     ImGui.TableNextRow();
+                    Theme.RowHover();
                     TimeCell(drop.AtSeconds);
                     IconCell(dot.Icon, dot.NameText);
                     ImGui.TableNextColumn();
@@ -607,6 +636,7 @@ public sealed partial class MainWindow
                 foreach (var s in sources)
                 {
                     ImGui.TableNextRow();
+                    Theme.RowHover();
                     IconCell(s.Icon, s.IsHot ? Loc.F("{0} (HoT)",s.Name) : s.Name);
                     ImGui.TableNextColumn();
                     ImGui.TextUnformatted(NumberFormat.Format(s.Healing, NumberStyle.Compact));
@@ -628,7 +658,8 @@ public sealed partial class MainWindow
     /// <summary>When each party member used each of their mitigations and defensive buffs: tanks, healers, then DPS.</summary>
     private static void DrawMitigations(IReadOnlyList<MitigationUse> uses)
     {
-        Theme.SectionHeader(Loc.T("Mitigation"), FontAwesomeIcon.ShieldAlt, Loc.T("Mitigations (on the party or on the boss) and defensive buffs used by each party member, with the time of each use. GCD shields (Succor, Eukrasian Prognosis...) are left out. Party members far from you may be missed."));
+        if (!Theme.Section(Loc.T("Mitigation"), FontAwesomeIcon.ShieldAlt, "pull.mitigation", Loc.T("Mitigations (on the party or on the boss) and defensive buffs used by each party member, with the time of each use. GCD shields (Succor, Eukrasian Prognosis...) are left out. Party members far from you may be missed.")))
+            return;
 
         static int RoleOrder(string job) => JobRoles.Of(job) switch { JobRole.Tank => 0, JobRole.Healer => 1, _ => 2 };
         var players = uses.GroupBy(u => u.Player)
@@ -652,13 +683,14 @@ public sealed partial class MainWindow
             if (!open)
                 continue;
 
-            using (var table = DetailTable($"##mittable{player.Key}", (Loc.T("Mitigation"), -2), (Loc.T("Uses"), 40), (Loc.T("Times"), -5)))
+            using (var table = DetailTable($"##mittable{player.Key}", (Loc.T("Mitigation"), -2), (Loc.T("Uses"), 40), (Loc.T("Times"), 380)))
             {
                 if (table)
                 {
                     foreach (var action in player.GroupBy(u => GameNames.Action(u.ActionId, u.Action)).OrderBy(g => g.First().AtSeconds))
                     {
                         ImGui.TableNextRow();
+                        Theme.RowHover();
                         IconCell(ActionIcons.OfAction(action.First().ActionId), action.Key);
                         ImGui.TableNextColumn();
                         ImGui.TextUnformatted(action.Count().ToString());
@@ -691,6 +723,7 @@ public sealed partial class MainWindow
                 foreach (var g in mine.GroupBy(m => GameNames.Action(m.ActionId, m.Action)).OrderByDescending(g => g.Count()))
                 {
                     ImGui.TableNextRow();
+                    Theme.RowHover();
                     IconCell(ActionIcons.OfAction(g.First().ActionId), g.Key);
                     ImGui.TableNextColumn();
                     ImGui.TextUnformatted(g.Count().ToString());
@@ -797,17 +830,18 @@ public sealed partial class MainWindow
 
     private static void DrawTankSwapTable(IReadOnlyList<TankSwap> swaps)
     {
-        using (var table = ImRaii.Table("##tankswaps", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+        using (var table = ImRaii.Table("##tankswaps", 3, ImGuiTableFlags.RowBg | Theme.FitTable))
         {
             if (table)
             {
                 ImGui.TableSetupColumn(Loc.T("Time"), ImGuiTableColumnFlags.WidthFixed, Theme.Px(60));
-                ImGui.TableSetupColumn(Loc.T("Swap"));
-                ImGui.TableSetupColumn(Loc.T("Why"));
+                ImGui.TableSetupColumn(Loc.T("Swap"), ImGuiTableColumnFlags.WidthFixed);
+                ImGui.TableSetupColumn(Loc.T("Why"), ImGuiTableColumnFlags.WidthFixed);
                 ImGui.TableHeadersRow();
                 foreach (var s in swaps)
                 {
                     ImGui.TableNextRow();
+                    Theme.RowHover();
                     ImGui.TableNextColumn();
                     ImGui.TextColored(Theme.TextFaint, NumberFormat.Duration(TimeSpan.FromSeconds(s.AtSeconds)));
                     ImGui.TableNextColumn();
@@ -989,6 +1023,7 @@ public sealed partial class MainWindow
         foreach (var g in clips)
         {
             ImGui.TableNextRow(ImGuiTableRowFlags.None, rowHeight);
+            Theme.RowHover();
             TextCell(NumberFormat.Duration(TimeSpan.FromSeconds(g.AtSeconds)), Theme.TextFaint);
             TextCell($"{g.Seconds:0.00}s", g.Seconds >= 0.5 ? Theme.Bad : Theme.Warn);
 
@@ -1138,9 +1173,10 @@ public sealed partial class MainWindow
     }
 
     /// <summary>Every death of the party in time order, with its cause; hover one for the hits taken just before.</summary>
-    private static void DrawDeaths(IReadOnlyList<PartyDeath> deaths)
+    private static void DrawDeaths(IReadOnlyList<PartyDeath> deaths, IReadOnlyList<MitigationUse> mitigations, IReadOnlyList<DebuffSpan> debuffs)
     {
-        Theme.SectionHeader(Loc.T("Deaths"), FontAwesomeIcon.Skull);
+        if (!Theme.Section(Loc.T("Deaths"), FontAwesomeIcon.Skull, "deaths"))
+            return;
         if (deaths.Count == 0)
             ImGui.TextColored(Theme.Good, Loc.T("No death."));
         else
@@ -1149,14 +1185,14 @@ public sealed partial class MainWindow
         if (deaths.Count == 0)
             return;
 
-        var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.PadOuterX;
+        var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | Theme.FitTable | ImGuiTableFlags.PadOuterX;
         using var table = ImRaii.Table("##deaths", 3, flags);
         if (!table)
             return;
 
         ImGui.TableSetupColumn(Loc.T("Time"), ImGuiTableColumnFlags.WidthFixed, ImGui.CalcTextSize("00:00").X + Theme.Px(12));
-        ImGui.TableSetupColumn(Loc.T("Player"), ImGuiTableColumnFlags.WidthStretch, 2f);
-        ImGui.TableSetupColumn(Loc.T("Killed by"), ImGuiTableColumnFlags.WidthStretch, 4f);
+        ImGui.TableSetupColumn(Loc.T("Player"), ImGuiTableColumnFlags.WidthFixed);
+        ImGui.TableSetupColumn(Loc.T("Killed by"), ImGuiTableColumnFlags.WidthFixed);
         ImGui.TableHeadersRow();
 
         for (var i = 0; i < deaths.Count; i++)
@@ -1168,7 +1204,7 @@ public sealed partial class MainWindow
                 ImGui.Selectable($"{NumberFormat.Duration(TimeSpan.FromSeconds(d.AtSeconds))}##death{i}", false,
                                  ImGuiSelectableFlags.SpanAllColumns);
             if (ImGui.IsItemHovered())
-                DeathTooltip(d);
+                DeathTooltip(d, mitigations, debuffs);
 
             ImGui.TableNextColumn();
             ImGui.TextColored(d.IsYou ? Theme.GoldBright : Theme.Text, Names.Show(d.Player));
@@ -1195,7 +1231,7 @@ public sealed partial class MainWindow
     }
 
     /// <summary>A death's recap: HP left, then the last hits taken, oldest first.</summary>
-    private static void DeathTooltip(PartyDeath d)
+    private static void DeathTooltip(PartyDeath d, IReadOnlyList<MitigationUse> mitigations, IReadOnlyList<DebuffSpan> debuffs)
     {
         using var tooltip = ImRaii.Tooltip();
         ImGui.TextColored(d.IsYou ? Theme.GoldBright : Theme.Text, Names.Show(d.Player));
@@ -1205,10 +1241,7 @@ public sealed partial class MainWindow
             ImGui.TextColored(Theme.TextMuted, Loc.F("HP before the last hit: {0}",d.HpBefore.ToString("N0", CultureInfo.InvariantCulture)));
 
         if (d.Recap.Count == 0)
-        {
             ImGui.TextColored(Theme.TextFaint, Loc.T("No hit recorded just before."));
-            return;
-        }
 
         foreach (var h in d.Recap)
         {
@@ -1223,11 +1256,78 @@ public sealed partial class MainWindow
                 ImGui.TextColored(Theme.TextMuted, $"({h.Source})");
             }
         }
+
+        DrawDeathVulnerabilities(d, debuffs);
+        DrawDeathMitigations(d, mitigations);
+    }
+
+    private static readonly Dictionary<uint, bool> VulnerabilityStatuses = new();
+
+    // Vulnerability Up (physical, magic...): the same few names, with ids differing from one fight to another.
+    private static bool IsVulnerability(uint statusId)
+    {
+        if (!VulnerabilityStatuses.TryGetValue(statusId, out var is_))
+        {
+            var name = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Status>(Dalamud.Game.ClientLanguage.English)
+                             .TryGetRow(statusId, out var row) ? row.Name.ExtractText() : string.Empty;
+            is_ = name.EndsWith("Vulnerability Up", StringComparison.OrdinalIgnoreCase);
+            VulnerabilityStatuses[statusId] = is_;
+        }
+
+        return is_;
+    }
+
+    // The vulnerabilities on a player when they died (the debuffs go when they die: those up until then), with their
+    // icon, stacks and what put them.
+    private static void DrawDeathVulnerabilities(PartyDeath d, IReadOnlyList<DebuffSpan> debuffs)
+    {
+        var on = debuffs.Where(b => b.Player == d.Player && IsVulnerability(b.StatusId) && b.AppliedSeconds <= d.AtSeconds + 0.1
+                                    && (b.EndSeconds is not { } end || end >= d.AtSeconds - 0.5))
+                        .ToList();
+        if (on.Count == 0)
+            return;
+
+        ImGui.Separator();
+        ImGui.TextColored(Theme.Bad, Loc.T("Vulnerabilities on them:"));
+        var size = ImGui.GetTextLineHeight();
+        foreach (var b in on)
+        {
+            ImGui.Dummy(new Vector2(Theme.Px(6), size));
+            ImGui.SameLine(0, 0);
+            var icon = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Status>().TryGetRow(b.StatusId, out var row) ? row.Icon : 0u;
+            ActionIcons.Draw(icon, size);
+            ImGui.SameLine(0, Theme.Px(5));
+            var stacks = b.Param > 1 && b.Param < 16 ? $" x{b.Param}" : string.Empty;
+            ImGui.TextUnformatted(GameNames.Status(b.StatusId, b.Status) + stacks);
+            ImGui.SameLine(0, Theme.Px(5));
+            var from = b.Source.Length > 0 ? $"{b.Source}, " : string.Empty;
+            ImGui.TextColored(Theme.TextMuted, $"({from}{NumberFormat.Duration(TimeSpan.FromSeconds(b.AppliedSeconds))})");
+        }
+    }
+
+    // The mitigations up when a player died: on the party (or the enemy), then on the player alone.
+    private static void DrawDeathMitigations(PartyDeath d, IReadOnlyList<MitigationUse> mitigations)
+    {
+        if (mitigations.Count == 0)
+            return;
+
+        var up = MitigationDurations.ActiveAt(mitigations, d.AtSeconds, u => EnglishName(u.ActionId));
+        var onParty = up.Where(u => MitigationDurations.ProtectedOne(u, EnglishName(u.ActionId)) is null).ToList();
+        var onPlayer = up.Where(u => MitigationDurations.ProtectedOne(u, EnglishName(u.ActionId)) == d.Player).ToList();
+
+        ImGui.Separator();
+        ImGui.TextColored(Theme.TextMuted, onParty.Count > 0 ? Loc.T("Party mitigation up:") : Loc.T("No party mitigation up."));
+        foreach (var u in onParty)
+            DrawMitigationLine(u);
+        ImGui.TextColored(Theme.TextMuted, onPlayer.Count > 0 ? Loc.F("On {0}:", Names.Show(d.Player)) : Loc.F("Nothing on {0}.", Names.Show(d.Player)));
+        foreach (var u in onPlayer)
+            DrawMitigationLine(u);
     }
 
     private static void DrawMistakes(IReadOnlyList<MechanicMistake> mistakes, bool timeline)
     {
-        Theme.SectionHeader(Loc.T("Failed mechanics"), FontAwesomeIcon.ExclamationTriangle);
+        if (!Theme.Section(Loc.T("Failed mechanics"), FontAwesomeIcon.ExclamationTriangle, "mistakes"))
+            return;
         if (mistakes.Count == 0)
             ImGui.TextColored(Theme.Good, Loc.T("No failed mechanic."));
         else
@@ -1244,19 +1344,20 @@ public sealed partial class MainWindow
                               .OrderByDescending(p => p.Count)
                               .ToList();
 
-        var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.PadOuterX;
+        var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | Theme.FitTable | ImGuiTableFlags.PadOuterX;
         using (var table = ImRaii.Table("##mistakes", 3, flags))
         {
             if (table)
             {
-                ImGui.TableSetupColumn(Loc.T("Player"), ImGuiTableColumnFlags.WidthStretch, 2f);
+                ImGui.TableSetupColumn(Loc.T("Player"), ImGuiTableColumnFlags.WidthFixed);
                 ImGui.TableSetupColumn(Loc.T("Count"), ImGuiTableColumnFlags.WidthFixed, ImGui.CalcTextSize(Loc.T("Count")).X + Theme.Px(8));
-                ImGui.TableSetupColumn(Loc.T("Debuffs"), ImGuiTableColumnFlags.WidthStretch, 4f);
+                ImGui.TableSetupColumn(Loc.T("Debuffs"), ImGuiTableColumnFlags.WidthFixed);
                 ImGui.TableHeadersRow();
 
                 foreach (var p in players)
                 {
                     ImGui.TableNextRow();
+                    Theme.RowHover();
                     ImGui.TableNextColumn();
                     // The whole row is hoverable, for the detail of each failed mechanic.
                     var start = ImGui.GetCursorPos();
@@ -1428,6 +1529,7 @@ public sealed partial class MainWindow
         foreach (var c in rows)
         {
             ImGui.TableNextRow(ImGuiTableRowFlags.None, iconSize + Theme.Px(4));
+            Theme.RowHover();
             var hasJob = c.Job.Length > 0;
             if (hasJob)
                 rank++;

@@ -209,7 +209,9 @@ public sealed unsafe class NativeCombatTracker : IDisposable
             if (header->ActionType == 1 && party.TryGetValue(casterEntityId, out var caster))
             {
                 tankSwaps.OnAction(casterEntityId, header->ActionId);
-                mitigations.OnAction(caster.Name, caster.Job, caster.IsLocalPlayer, header->ActionId);
+                // The party member it landed on, when it hit only one (a buff on its user, a shield on a tank...).
+                var target = header->NumTargets == 1 && party.TryGetValue((uint)targetEntityIds[0].ObjectId, out var on) ? on.Name : string.Empty;
+                mitigations.OnAction(caster.Name, caster.Job, caster.IsLocalPlayer, header->ActionId, target);
             }
             var isLocal = casterEntityId != 0 && casterEntityId == objectTable.LocalPlayer?.EntityId;
             if (isLocal)

@@ -81,6 +81,85 @@ public sealed class ContentCategories
         return release;
     }
 
+    private readonly Dictionary<(uint, string, string), string?> displayNames = new();
+    private readonly Dictionary<uint, List<uint>> savageFloors = new();
+
+    // The letter of each expansion's savage floors (Heavensward: A1S, Stormblood: O1S, ... Dawntrail: M1S).
+    private static readonly Dictionary<uint, char> SavageLetters = new() { [1] = 'A', [2] = 'O', [3] = 'E', [4] = 'P', [5] = 'M' };
+
+    private static readonly System.Text.RegularExpressions.Regex TrailingParenthesis =
+        new(@"\s*[\(（][^\(（]*[\)）]\s*$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// The name of a fight as the windows show it, by kind of content: "The Jade Stoa Unreal (Byakko)", "The Unmaking
+    /// EX (Enuo)", "AAC Heavyweight M4 (M12S)", "The Epic of Alexander (TEA)". Null for the other kinds (shown as before).
+    /// </summary>
+    /// <param name="encounter">The fight's key (<see cref="Progression.Encounter"/>): the boss, or the ultimate's name.</param>
+    public string? DisplayName(uint territory, string encounter)
+    {
+        var key = (territory, encounter, Loc.Code);
+        if (!displayNames.TryGetValue(key, out var name))
+        {
+            name = BuildName(territory, encounter);
+            displayNames[key] = name;
+        }
+
+        return name;
+    }
+
+    private string? BuildName(uint territory, string encounter)
+    {
+        if (Ultimates.UltimateTracker.FightFor(territory) is { } ultimate)
+            return $"{ultimate.Name} ({ultimate.Key})";
+
+        var category = Of(territory);
+        if (category is not (ContentCategory.Extreme or ContentCategory.Savage)
+            || !dataManager.GetExcelSheet<TerritoryType>().TryGetRow(territory, out var row)
+            || row.ContentFinderCondition.ValueNullable is not { } duty)
+            return null;
+
+        // The duty's name without its "(Extreme)", "(Unreal)", "(Savage)".
+        var zone = TrailingParenthesis.Replace(duty.Name.ExtractText(), string.Empty).Trim();
+        if (zone.Length == 0)
+            return null;
+        zone = char.ToUpperInvariant(zone[0]) + zone[1..];
+
+        if (category == ContentCategory.Extreme)
+        {
+            var english = dataManager.GetExcelSheet<ContentFinderCondition>(ClientLanguage.English)
+                                     .TryGetRow(duty.RowId, out var en) ? en.Name.ExtractText() : string.Empty;
+            var kind = english.Contains("(Unreal)", StringComparison.OrdinalIgnoreCase) ? "Unreal" : "EX";
+            return encounter.Length > 0 ? $"{zone} {kind} ({encounter})" : $"{zone} {kind}";
+        }
+
+        return SavageFloor(row.ExVersion.RowId, duty.RowId) is { } floor ? $"{zone} ({floor})" : zone;
+    }
+
+    // "M12S": the floor's letter for its expansion and its place among the expansion's savage floors, in the Duty
+    // Finder's order. Null for an expansion without a letter or a duty not found (alliance raids).
+    private string? SavageFloor(uint expansion, uint duty)
+    {
+        if (!SavageLetters.TryGetValue(expansion, out var letter))
+            return null;
+
+        if (!savageFloors.TryGetValue(expansion, out var floors))
+        {
+            var sections = dataManager.GetExcelSheet<ContentUICategory>(ClientLanguage.English);
+            floors = dataManager.GetExcelSheet<ContentFinderCondition>(ClientLanguage.English)
+                                .Where(d => d.ContentType.RowId == Raids
+                                            && d.TerritoryType.ValueNullable is { } t && t.ExVersion.RowId == expansion
+                                            && sections.TryGetRow(d.ContentUICategory.RowId, out var ui)
+                                            && ui.Name.ExtractText().StartsWith("Savage", StringComparison.OrdinalIgnoreCase))
+                                .OrderBy(d => d.SortKey).ThenBy(d => d.RowId)
+                                .Select(d => d.RowId)
+                                .ToList();
+            savageFloors[expansion] = floors;
+        }
+
+        var index = floors.IndexOf(duty);
+        return index < 0 ? null : $"{letter}{index + 1}S";
+    }
+
     /// <summary>The expansions, by id, with their name in the client's language.</summary>
     public IReadOnlyList<(uint Id, string Name)> Expansions() =>
         dataManager.GetExcelSheet<ExVersion>().Select(e => (e.RowId, e.Name.ExtractText())).Where(e => e.Item2.Length > 0).ToList();

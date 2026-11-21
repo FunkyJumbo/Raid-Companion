@@ -64,9 +64,9 @@ public sealed partial class MainWindow
 
         DrawPersonal(snapshot);
 
-        Theme.SectionHeader(Loc.T("Party"), FontAwesomeIcon.Users);
+        var showParty = Theme.Section(Loc.T("Party"), FontAwesomeIcon.Users, "live.party");
         // The rows only change with the snapshot (about once per second).
-        if (!ReferenceEquals(snapshot, liveRowsSnapshot))
+        if (showParty && !ReferenceEquals(snapshot, liveRowsSnapshot))
         {
             liveRowsSnapshot = snapshot;
             liveRows = snapshot.Combatants.Select(c => new PullCombatant
@@ -76,20 +76,18 @@ public sealed partial class MainWindow
             }).ToList();
         }
 
-        DrawCombatantTable(liveRows);
+        if (showParty)
+            DrawCombatantTable(liveRows);
 
         var liveDeaths = plugin.Tracker.PartyDeaths.Since(snapshot.StartUtc);
         if (liveDeaths.Count > 0)
-            DrawDeaths(liveDeaths);
+            DrawDeaths(liveDeaths, plugin.Tracker.Mitigations.Current, plugin.FightLog.DebuffsSince(snapshot.StartUtc));
 
         if (plugin.Tracker.Mistakes.Current is { Count: > 0 } mistakes)
             DrawMistakes(mistakes, timeline: false);
 
-        if (config.ShowGraph)
-        {
-            Theme.SectionHeader(Loc.T("Graph"), FontAwesomeIcon.ChartLine);
+        if (Theme.Section(Loc.T("Graph"), FontAwesomeIcon.ChartLine, "live.graph"))
             DrawLiveGraph(threshold);
-        }
     }
 
     /// <summary>Compact view and Opener practice, at the right of the line.</summary>
@@ -239,11 +237,34 @@ public sealed partial class MainWindow
         var swaps = role == JobRole.Tank ? plugin.Tracker.TankSwaps.Current : null;
         var planMisses = plugin.PlanCheck.Checks(plugin.CurrentTerritory) ? plugin.PlanCheck.Live : null;
 
+        // Only the lines the player wants (Settings).
+        var shown = plugin.Configuration.PersonalElements;
+        if (!shown.HasFlag(PersonalElement.Gcd))
+            up = null;
+        gauge &= shown.HasFlag(PersonalElement.Gauge);
+        if (!shown.HasFlag(PersonalElement.Positionals))
+            positionals = [];
+        if (!shown.HasFlag(PersonalElement.RotationErrors))
+        {
+            combos = [];
+            showCombos = false;
+        }
+
+        if (!shown.HasFlag(PersonalElement.MitigationPlan))
+            planMisses = null;
+        if (!shown.HasFlag(PersonalElement.Dots))
+            dots = null;
+        if (!shown.HasFlag(PersonalElement.Overheal))
+            heals = null;
+        if (!shown.HasFlag(PersonalElement.TankSwaps))
+            swaps = null;
+
         if (up is null && !gauge && positionals.Count == 0 && !showCombos && dots is null
             && heals is not { Count: > 0 } && swaps is not { Count: > 0 } && planMisses is null)
             return;
 
-        Theme.SectionHeader(Loc.T("Personal"), FontAwesomeIcon.User);
+        if (!Theme.Section(Loc.T("Personal"), FontAwesomeIcon.User, "live.personal"))
+            return;
         if (up is not null)
             DrawGcdAnalysis(up.Gcd, showGaps: false, uptime: up.Uptime, lostSeconds: up.LostSeconds);
         if (gauge)
@@ -296,7 +317,8 @@ public sealed partial class MainWindow
     /// <summary>Ultimate phase: phase timer, boss HP, DPS on the boss vs the DPS needed, projected kill.</summary>
     private static void DrawPhase(PhaseView phase)
     {
-        Theme.SectionHeader($"{phase.Fight.Key} {phase.Label}", FontAwesomeIcon.LayerGroup);
+        if (!Theme.Section($"{phase.Fight.Key} {phase.Label}", FontAwesomeIcon.LayerGroup, "live.phase"))
+            return;
         if (!phase.Supported)
         {
             Theme.Hint(Loc.T("Phase not supported yet."));

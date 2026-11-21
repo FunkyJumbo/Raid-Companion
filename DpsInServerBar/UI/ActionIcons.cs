@@ -52,6 +52,22 @@ public static class ActionIcons
         return icon;
     }
 
+    private static readonly Dictionary<uint, (uint Icon, string Name)> Items = new();
+
+    /// <summary>Icon and name (in the plugin language) of an item, e.g. a potion; 0 and "#id" if unknown.</summary>
+    public static (uint Icon, string Name) OfItem(uint itemId)
+    {
+        if (!Items.TryGetValue(itemId, out var item))
+        {
+            item = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>(Loc.GameLanguage).TryGetRow(itemId, out var row)
+                       ? (row.Icon, row.Name.ExtractText())
+                       : (0u, $"#{itemId}");
+            Items[itemId] = item;
+        }
+
+        return item;
+    }
+
     /// <summary>Name of an action in the client language, "#id" if unknown.</summary>
     public static string NameOf(uint actionId) =>
         Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Action>().TryGetRow(actionId, out var row) ? row.Name.ExtractText() : $"#{actionId}";

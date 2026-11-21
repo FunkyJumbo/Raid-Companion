@@ -109,7 +109,7 @@ During the fight, two minimalist displays keep your UI clean:
 - **Party** — every player's DPS, rDPS, damage %, crit, direct hit, crit direct hit and deaths, sortable by DPS or rDPS. Hover an rDPS
   value to see what the player gave to / received from buffs.
 - **Deaths** — every death of the party with its cause (the hit that took the last HP, a debuff running out, a fall
-  from the arena); hover a death for the last hits taken before it.
+  from the arena); hover a death for the last hits taken before it, the vulnerabilities on the player and the mitigation up (on the party, and on the player).
 - **Failed mechanics** — each penalty debuff an enemy action put on a party member (Vulnerability Up, Damage Down,
   Down for the Count), per player, with when and from which attack. Tankbuster vulnerabilities on tanks can be
   ignored (Settings > Pulls history; still a work in progress).
@@ -194,12 +194,16 @@ can compare your damage stats between two pulls. In the settings you choose the 
   clip, and a table of the clips: the GCD before, the oGCDs woven, the GCD that came late and the time between the
   two), gauge overcap (the actions that overcapped each gauge), positionals and rotation errors (each miss with its time),
   DoT uptime (each time a DoT stayed off the boss), overheal (per heal action and HoT), tank swaps and your mitigation.
+  Every section of Live and History folds with a click on the **dash** before its title (a **plus** shows it again; the graph included).
+  History also shows your **rotation**: a timeline of your GCDs and oGCDs (and potions) in the pull, the 30 s before it included
+  (shaded), scrolled with the wheel and zoomed with Ctrl + wheel; hover an icon for its action and time.
   History also shows the **DPS lost to Damage Down and to Weakness / Brink of Death** after a raise (*experimental*, estimated from
   your damage while each debuff was on, with each one listed).
 - **Mitigation** — for each party member, every mitigation and defensive buff used, with the time of each use
   (GCD shields left out).
 - **Timeline** — along the pull, one lane each for what you tick: deaths, tank swaps, failed mechanics and mitigation
-  (one lane per player, by the icon of each action). Hover a mark for its detail.
+  (one lane per player, by the icon of each action). Hover a mark for its detail. **Zoom** with Ctrl + wheel or the
+  buttons under it; zoomed in, the wheel or a drag moves along the pull.
 - **Casts & debuffs** — next to the timeline, a table of every cast started by the enemies and every debuff put on a
   party member: when it was applied, on whom, by whom, when it ran out and how long it lasted. The enemies' attacks with
   no cast bar that hurt the party (an instant raidwide, adds fed to the boss...) are in it too, marked *instant*;
@@ -298,13 +302,17 @@ ultimate these lines replace the pull summary.
 Who uses which mitigation on each cast of a fight, as raid groups keep it in a spreadsheet: one row per cast, one
 column per role (MT, OT, H1, H2, M1, M2, R1, R2, or jobs), the skills of each cell shown by their icon (up to three
 side by side, centered). Open it with **Mitigation plans** in Live: the list of the plans of every fight, by name, with a
-search (a fight searched shows all its plans). **Show** opens a plan in its own window, **Edit** opens it in the editor.
+search (a fight searched shows all its plans). **Show** opens a plan in a compact pop-up, like the compact meter (no title bar,
+dragged by its background, sized to the plan; at the right of its tabs, buttons for your position only or the whole group,
+edit and close; right click for your column, **your position only** (its column and
+the casts where it has something), the check of your mitigations, its background, share and edit), **Edit** opens it in the editor, the **copy** button duplicates it (named "... (1)").
 
 - **Make one from a pull**: in History, **New mitigation plan** next to the timeline of a pull. The casts of the pull
   are listed on the right (the instant attacks too): click one to add it as a row, at its time.
 - **Pick the skills**: click a cell to see the skills of its column's role (role actions, then each job: tank skills
   for MT and OT, healer skills for H1 and H2, every DPS skill for the DPS spots, as a ranged may stand in a melee spot),
-  and tick as many as needed. A cell can also hold a note, shown on hover of the "?" next to its skills.
+  and tick as many as needed. Skills are offered as at the fight's level (Sentinel rather than Guardian in a level 80
+  fight; the ones not learned yet are left out). A cell can also hold a note, shown on hover of the "?" next to its skills.
 - **Jobs of your group**: click the name of a column to choose the job played there: its icon shows next to the name,
   and the cells of the column show and offer its skills only (the others stay in the plan, for other groups); your mitigations are checked on them only, or on the skills of the job you play when no job is chosen. This choice stays with you: a shared plan carries no job, each
   group picks its own.
@@ -318,7 +326,7 @@ search (a fight searched shows all its plans). **Show** opens a plan in its own 
   like a cast of the fight are linked to it right away.
 - **Share**: one player makes the plan and copies its code (share button); the others copy the code and click the
   paste button.
-- **Edit**: the pen opens the editor: name, columns, part, cast, rows moved or removed, and the **timeline cast** of
+- **Edit**: the pen opens the editor: name, **composition** (the positions of the group by role, any roles: two tanks and six DPS, three healers...; click one to change its role or name), **tabs** (one per phase...; right click a tab to rename or remove it), **separators** (a line across the plan, with a word if you like), the note and cast of each row, the part titles (the gold lines, renamed or removed), rows moved or removed (each attack of the pull once), and the **timeline cast** of
   each row (which cast, and which use of it in the pull).
 - **During a pull** of the plan's fight, the plan follows the casts as the enemies start them: the cast in progress is
   lit in green, the next one in gold, and the table scrolls to it. Only the rows linked to a cast of the timeline can be
@@ -413,7 +421,7 @@ macros keep working.
 
 | Tab | Contents |
 |---|---|
-| **Display** | **Language** (English, French, German or Al Bhed; Auto follows Dalamud's language), compact meter (columns, header, background opacity), DPS graphs in the main window and their rolling window, **cards shown** in Live and History (GCD uptime card off by default), Limit Break in party DPS, **hide player names** (made-up names in every window, for screenshots) |
+| **Display** | **Language** (English, French, German or Al Bhed; Auto follows Dalamud's language), compact meter (columns, header, background opacity), the rolling window of the DPS graphs, the **lines of Personal**, **cards shown** in Live and History (GCD uptime card off by default), Limit Break in party DPS, **hide player names** (made-up names in every window, for screenshots) |
 | **DPS in server bar** | Presets (renamable, switchable with `/raidcompanion preset N`), metric, number format (`12345` / `12,345` / `12.3k`), bar elements and their order, separator, **bar preview** (placeholder values for 10 s), auto-hide, colors |
 | **Chat summary** | Pull summary on/off, in dungeons, at the end of each ultimate phase, each party death as it happens (optionally with the overkill), values shown, comparison with your best kill, **preview in chat** |
 | **Appearance** | Theme presets (Midnight, Crimson, Emerald, Aether, Slate, Frost), saved custom themes (renamable), themes shared with a code, background opacity, **glass effect** on any theme (frosted see-through windows with the game blurred behind them, blur strength adjustable; Midnight with the glass effect for a new install), custom colors, preview |

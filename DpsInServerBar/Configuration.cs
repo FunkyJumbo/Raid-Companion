@@ -117,6 +117,25 @@ public enum SummaryElement
     All = Job | Dps | Rdps | Uptime | PartyDps | Deaths | KilledBy | Mistakes,
 }
 
+/// <summary>The lines of the Personal section (Live and History) the player wants to see.</summary>
+[Flags]
+public enum PersonalElement
+{
+    None = 0,
+    Gcd = 1,
+    Rotation = 2,
+    DamageLoss = 4,
+    Gauge = 8,
+    Positionals = 16,
+    RotationErrors = 32,
+    MitigationPlan = 64,
+    Dots = 128,
+    Overheal = 256,
+    Mitigation = 512,
+    TankSwaps = 1024,
+    All = Gcd | Rotation | DamageLoss | Gauge | Positionals | RotationErrors | MitigationPlan | Dots | Overheal | Mitigation | TankSwaps,
+}
+
 /// <summary>Optional columns of the compact meter.</summary>
 [Flags]
 public enum CompactColumn
@@ -247,7 +266,14 @@ public sealed class Configuration : IPluginConfiguration
         ActiveBarPreset >= 0 && ActiveBarPreset < BarPresets.Count ? BarPresets[ActiveBarPreset] : null;
 
     /// <summary>Show the DPS graphs in the main window.</summary>
+    /// <summary>Replaced by the Hide button of the Graph sections (see HiddenSections): only read once.</summary>
     public bool ShowGraph { get; set; } = true;
+
+    /// <summary>Sections of the main window hidden with their Hide button (their keys: "live.graph", "pull.party"...).</summary>
+    public HashSet<string> HiddenSections { get; set; } = [];
+
+    /// <summary>The lines shown in the Personal section of Live and History.</summary>
+    public PersonalElement PersonalElements { get; set; } = PersonalElement.All;
 
     /// <summary>What the History timeline shows: deaths, tank swaps, failed mechanics, mitigation (one lane per player).</summary>
     public bool TimelineDeaths { get; set; } = true;
@@ -257,6 +283,9 @@ public sealed class Configuration : IPluginConfiguration
     public bool TimelineMistakes { get; set; } = true;
 
     public bool TimelineMitigation { get; set; } = true;
+
+    /// <summary>History timeline: the enemies' attacks (casts and instant attacks), on a lane at the top.</summary>
+    public bool TimelineBossAttacks { get; set; } = true;
 
     /// <summary>Expansions left out of the list of fights in History and Progression (expansion ids).</summary>
     public HashSet<uint> HiddenExpansions { get; set; } = [];
@@ -303,8 +332,17 @@ public sealed class Configuration : IPluginConfiguration
     /// <summary>Opener practice: opacity of the windows' background only, 0 (see-through) to 1.</summary>
     public float OpenerOpacity { get; set; } = 1f;
 
+    /// <summary>Mitigation plan pop-up: your position only (its column, and the rows where it has something).</summary>
+    public bool MitigationOnlyMine { get; set; }
+
+    /// <summary>Background opacity of the mitigation plan pop-up (0-1).</summary>
+    public float MitigationOpacity { get; set; } = 1f;
+
     /// <summary>Opener practice: size of the compact pop-up (icons, text and buttons), 0.5 to 1.5.</summary>
     public float OpenerCompactScale { get; set; } = 1f;
+
+    /// <summary>Size of the opener's actions in the full opener practice window (0.5-1.5).</summary>
+    public float OpenerScale { get; set; } = 1f;
 
     /// <summary>Opener practice: close the window once the opener is done, or this long after its first action.</summary>
     public bool OpenerAutoClose { get; set; }
@@ -637,6 +675,27 @@ public sealed class Configuration : IPluginConfiguration
         if (!Enum.IsDefined(ThemePreset))
         {
             ThemePreset = ThemePreset.Midnight;
+            changed = true;
+        }
+
+        // Two openers of yours with one id could not be told apart: the second gets one of its own.
+        var openerIds = new HashSet<string>();
+        foreach (var opener in CustomOpeners)
+        {
+            if (!openerIds.Add(opener.Id))
+            {
+                opener.Id = Opener.CustomOpeners.NewId();
+                openerIds.Add(opener.Id);
+                changed = true;
+            }
+        }
+
+        // The graph setting became the Hide button of the Graph sections.
+        if (!ShowGraph)
+        {
+            HiddenSections.Add("live.graph");
+            HiddenSections.Add("pull.graph");
+            ShowGraph = true;
             changed = true;
         }
 

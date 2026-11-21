@@ -196,6 +196,7 @@ public sealed class CompactWindow : Window
         foreach (var c in rows)
         {
             ImGui.TableNextRow(ImGuiTableRowFlags.None, iconSize + Theme.Px(2));
+            Theme.RowHover();
             var color = c.IsYou ? Theme.GoldBright : Theme.Text;
             void Cell(string text, Vector4 textColor)
             {

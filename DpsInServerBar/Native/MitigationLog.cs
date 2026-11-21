@@ -5,8 +5,11 @@ using Dalamud.Game;
 
 namespace DpsInServerBar.Native;
 
-/// <summary>A party member using a mitigation or a defensive buff in a pull.</summary>
-public sealed record MitigationUse(double AtSeconds, string Player, string Job, bool IsYou, uint ActionId, string Action);
+/// <summary>
+/// A party member using a mitigation or a defensive buff in a pull. <paramref name="Target"/>: the party member it was
+/// used on when it hit only one (its user for a buff of their own), empty otherwise and in older pulls.
+/// </summary>
+public sealed record MitigationUse(double AtSeconds, string Player, string Job, bool IsYou, uint ActionId, string Action, string Target = "");
 
 /// <summary>
 /// Records when each party member uses a mitigation (on the party or on the boss) or a defensive buff. The actions
@@ -40,6 +43,7 @@ public sealed class MitigationLog
     ];
 
     private static Dictionary<uint, string>? actions; // id -> name in the client's language
+    private static HashSet<uint>? partyActions;       // the ones recorded for everyone (the others: yours only)
 
     private readonly List<MitigationUse> uses = [];
     private bool wasInCombat;
@@ -76,12 +80,15 @@ public sealed class MitigationLog
     }
 
     /// <summary>A party member (not a pet) used an action (from the action effect hook).</summary>
-    public void OnAction(string player, string job, bool isYou, uint actionId)
+    public void OnAction(string player, string job, bool isYou, uint actionId, string target = "")
     {
-        if (!wasInCombat || uses.Count >= MaxUses || !Actions.TryGetValue(actionId, out var name))
+        // Everyone's mitigations; for you, also every skill a mitigation plan can hold (GCD shields, heals...), so the
+        // skills of your column show among your mitigations.
+        if (!wasInCombat || uses.Count >= MaxUses || !Actions.TryGetValue(actionId, out var name)
+            || (!isYou && !partyActions!.Contains(actionId)))
             return;
 
-        uses.Add(new MitigationUse((DateTime.UtcNow - startUtc).TotalSeconds, player, job, isYou, actionId, name));
+        uses.Add(new MitigationUse((DateTime.UtcNow - startUtc).TotalSeconds, player, job, isYou, actionId, name, target));
         revision++;
     }
 
@@ -92,14 +99,19 @@ public sealed class MitigationLog
             if (actions is not null)
                 return actions;
 
-            var wanted = Names.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var party = Names.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var wanted = party.Concat(Tracking.MitigationCatalog.Families.Keys).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var local = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Action>();
             actions = new Dictionary<uint, string>();
+            partyActions = [];
             foreach (var row in Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Action>(ClientLanguage.English))
             {
-                if (row.IsPvP || !(row.IsPlayerAction || row.IsRoleAction) || !wanted.Contains(row.Name.ExtractText()))
+                var english = row.Name.ExtractText();
+                if (row.IsPvP || !(row.IsPlayerAction || row.IsRoleAction || row.ClassJobLevel > 0) || !wanted.Contains(english))
                     continue;
-                actions[row.RowId] = local.TryGetRow(row.RowId, out var l) ? l.Name.ExtractText() : row.Name.ExtractText();
+                actions[row.RowId] = local.TryGetRow(row.RowId, out var l) ? l.Name.ExtractText() : english;
+                if (party.Contains(english))
+                    partyActions.Add(row.RowId);
             }
 
             return actions;

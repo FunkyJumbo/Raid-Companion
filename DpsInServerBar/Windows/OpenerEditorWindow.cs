@@ -207,10 +207,35 @@ public sealed class OpenerEditorWindow : Window
                 customShown = true;
             }
 
-            if (ImGui.Selectable($"{Loc.T(o.Name)}##{o.Id}", o.Id == selectedId))
+            using var id = ImRaii.PushId(o.Id);
+            if (ImGui.Selectable(Loc.T(o.Name), o.Id == selectedId))
             {
                 selectedId = o.Id;
                 SetRecording(false);
+            }
+
+            // Right click: duplicate it, or delete it (yours only, Ctrl held).
+            if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
+                ImGui.OpenPopup("##openermenu");
+            using var menu = ImRaii.Popup("##openermenu");
+            if (!menu)
+                continue;
+
+            if (ImGui.MenuItem(Loc.T("Duplicate")))
+                Add(CustomOpeners.Copy(o));
+            if (custom)
+            {
+                var ctrl = ImGui.GetIO().KeyCtrl;
+                if (ImGui.MenuItem(ctrl ? Loc.T("Delete") : Loc.T("Delete (hold Ctrl)"), false, ctrl)
+                    && plugin.Configuration.CustomOpeners.FirstOrDefault(c => c.Id == o.Id) is { } yours)
+                {
+                    plugin.Configuration.CustomOpeners.Remove(yours);
+                    if (selectedId == o.Id)
+                        selectedId = string.Empty;
+                    SetRecording(false);
+                    plugin.Configuration.Save();
+                    Say(Loc.F("{0} deleted.", yours.Name));
+                }
             }
         }
     }
@@ -371,6 +396,7 @@ public sealed class OpenerEditorWindow : Window
             var step = opener.Steps[i];
             using var id = ImRaii.PushId(i);
             ImGui.TableNextRow();
+            Theme.RowHover();
 
             ImGui.TableNextColumn();
             ImGui.AlignTextToFramePadding();
@@ -592,6 +618,17 @@ public sealed class OpenerEditorWindow : Window
 
     private void Add(CustomOpener opener)
     {
+        // A name of its own among your openers of the job: "My opener", then "My opener (1)", "My opener (2)"...
+        var taken = plugin.Configuration.CustomOpeners.Where(o => o.Job == opener.Job).Select(o => o.Name)
+                          .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (taken.Contains(opener.Name))
+        {
+            var n = 1;
+            while (taken.Contains($"{opener.Name} ({n})"))
+                n++;
+            opener.Name = $"{opener.Name} ({n})";
+        }
+
         plugin.Configuration.CustomOpeners.Add(opener);
         plugin.Configuration.Save();
         job = opener.Job;

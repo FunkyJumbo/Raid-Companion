@@ -57,6 +57,15 @@ public sealed class PullRecord
     /// <summary>Skills of your column of the mitigation plan not used in time; null when no plan checked you.</summary>
     public List<PlanMiss>? PlanMisses { get; set; }
 
+    /// <summary>Every check of your column of the mitigation plan (used in time or not); null when no plan checked you.</summary>
+    public List<PlanMiss>? PlanChecks { get; set; }
+
+    /// <summary>The checks of the plan: all of them, or for older pulls the misses only.</summary>
+    [JsonIgnore] public List<PlanMiss>? PlanResults => PlanChecks ?? PlanMisses;
+
+    /// <summary>Your actions in the pull (and in the 30 s before it, negative times), oldest first; empty for older pulls.</summary>
+    public List<RotationUse> Rotation { get; set; } = [];
+
     /// <summary>The mitigation plan you were checked against.</summary>
     public string PlanName { get; set; } = string.Empty;
 

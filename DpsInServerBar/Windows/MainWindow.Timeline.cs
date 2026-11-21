@@ -82,6 +82,7 @@ public sealed partial class MainWindow
         foreach (var row in rows)
         {
             ImGui.TableNextRow();
+            Theme.RowHover();
             TimeCell(row.At);
 
             ImGui.TableNextColumn();
@@ -124,10 +125,16 @@ public sealed partial class MainWindow
     private static string CastName(BossCast cast) =>
         cast.CastSeconds > 0 ? GameNames.Action(cast.ActionId, cast.Action) : Loc.F("{0} (instant)", GameNames.Action(cast.ActionId, cast.Action));
 
+    // The timeline's zoom (1 = the whole pull in the width) and the time at its left edge. Static, like the rotation's.
+    private static float timelineZoom = 1f;
+    private static double timelineStart;
+    private const float MaxTimelineZoom = 16f;
+
     private void DrawTimeline(PullRecord pull)
     {
         var config = plugin.Configuration;
-        Theme.SectionHeader(Loc.T("Timeline"), FontAwesomeIcon.Stream);
+        if (!Theme.Section(Loc.T("Timeline"), FontAwesomeIcon.Stream, "pull.timeline"))
+            return;
 
         var changed = false;
         bool Toggle(string label, bool value, Vector4 color, bool first = false)
@@ -143,13 +150,14 @@ public sealed partial class MainWindow
             return value;
         }
 
-        config.TimelineDeaths = Toggle(Loc.F("Deaths ({0})",pull.PartyDeaths.Count), config.TimelineDeaths, Theme.Bad, first: true);
+        config.TimelineBossAttacks = Toggle(Loc.F("Boss attacks ({0})", pull.BossCasts.Count), config.TimelineBossAttacks, BossColor, first: true);
+        config.TimelineDeaths = Toggle(Loc.F("Deaths ({0})",pull.PartyDeaths.Count), config.TimelineDeaths, Theme.Bad);
         config.TimelineTankSwaps = Toggle(Loc.F("Tank swaps ({0})",pull.TankSwaps.Count), config.TimelineTankSwaps, Theme.Tank);
         config.TimelineMistakes = Toggle(Loc.F("Failed mechanics ({0})",pull.Mistakes.Count), config.TimelineMistakes, Theme.Warn);
         config.TimelineMitigation = Toggle(Loc.F("Mitigation ({0})",pull.Mitigations.Count), config.TimelineMitigation, Theme.Crystal);
-        if (pull.PlanMisses is { } planMisses)
+        if (pull.PlanResults is { } planChecks)
         {
-            config.TimelinePlanMisses = Toggle(Loc.F("Plan misses ({0})", planMisses.Count), config.TimelinePlanMisses, Theme.Bad);
+            config.TimelinePlanMisses = Toggle(Loc.F("Plan misses ({0})", planChecks.Count(c => !c.Used)), config.TimelinePlanMisses, Theme.Bad);
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip(Loc.F("The skills of your column of the mitigation plan ({0}) not used in time, at the time their cast landed.", pull.PlanName));
         }
@@ -186,6 +194,17 @@ public sealed partial class MainWindow
         var iconSize = Theme.Px(20);
         var iconLane = iconSize + Theme.Px(2);
         var lanes = new List<TimelineLane>();
+
+        // At the top, the enemies' attacks when they landed, each with the mitigations up then.
+        if (config.TimelineBossAttacks && pull.BossCasts.Count > 0)
+        {
+            lanes.Add(new TimelineLane(FontAwesomeIcon.Crosshairs, null, dotLane, BossColor, TimelineMark.Dot,
+                                       pull.BossCasts.Select(c => (c.AtSeconds + c.CastSeconds, 0u, BossAttackTitle(c))).ToList())
+            {
+                DrawTip = k => DrawBossAttackTip(pull, pull.BossCasts[k]),
+            });
+        }
+
         if (config.TimelineDeaths && pull.PartyDeaths.Count > 0)
         {
             lanes.Add(new TimelineLane(FontAwesomeIcon.Skull, null, dotLane, Theme.Bad, TimelineMark.Dot,
@@ -204,7 +223,7 @@ public sealed partial class MainWindow
                                        pull.Mistakes.Select(m => (m.AtSeconds, 0u, $"{Names.Show(m.Player)}: {MistakeText(m)}")).ToList()));
         }
 
-        if (config.TimelinePlanMisses && pull.PlanMisses is { Count: > 0 } misses)
+        if (config.TimelinePlanMisses && pull.PlanResults?.Where(c => !c.Used).ToList() is { Count: > 0 } misses)
         {
             lanes.Add(new TimelineLane(FontAwesomeIcon.ClipboardList, null, iconLane, Theme.Bad, TimelineMark.Icon,
                                        misses.Select(m => (Math.Max(0, m.AtSeconds), ActionIcons.OfAction(m.ActionId),
@@ -235,7 +254,16 @@ public sealed partial class MainWindow
         var width = ImGui.GetContentRegionAvail().X;
         var gutter = Theme.Px(26);
         var pad = iconSize / 2 + Theme.Px(2);
-        float X(double seconds) => origin.X + gutter + pad + (float)(seconds / duration) * (width - gutter - pad * 2);
+
+        // The part of the pull shown: all of it, or a slice of it when zoomed in.
+        timelineZoom = Math.Clamp(timelineZoom, 1f, MaxTimelineZoom);
+        var span = duration / timelineZoom;
+        timelineStart = Math.Clamp(timelineStart, 0, duration - span);
+        var inner = width - gutter - pad * 2;
+        float X(double seconds) => origin.X + gutter + pad + (float)((seconds - timelineStart) / span) * inner;
+        double TimeAt(float x) => timelineStart + (x - origin.X - gutter - pad) / inner * span;
+        var left = origin.X + gutter;
+        var rightEdge = origin.X + width;
 
         // Icons that would overlap in a player's lane go one row lower: the lane grows.
         var rows = lanes.Select(l => l.Mark == TimelineMark.Icon ? PackIcons(l.Marks, X, iconSize) : null).ToList();
@@ -246,11 +274,48 @@ public sealed partial class MainWindow
         var hovered = ImGui.IsItemHovered();
         var mouse = ImGui.GetMousePos();
 
-        dl.AddRectFilled(origin, origin + new Vector2(width, height), Theme.U32(Theme.Panel, 0.8f), Theme.Px(4));
-        for (var minute = 60; minute < duration; minute += 60)
-            dl.AddLine(new Vector2(X(minute), origin.Y + Theme.Px(2)), new Vector2(X(minute), origin.Y + height - Theme.Px(2)), Theme.U32(Theme.Line, 0.6f), 1f);
+        // Ctrl + wheel zooms around the time under the mouse; the wheel or a drag moves along the pull once zoomed.
+        var io = ImGui.GetIO();
+        if (hovered && (io.KeyCtrl || timelineZoom > 1f))
+            ImGuiP.SetItemUsingMouseWheel(); // the wheel is the timeline's, not the window's scroll
+        if (hovered && io.MouseWheel != 0 && (io.KeyCtrl || timelineZoom > 1f))
+        {
+            if (io.KeyCtrl)
+            {
+                var mouseTime = TimeAt(mouse.X);
+                timelineZoom = Math.Clamp(timelineZoom * MathF.Pow(1.25f, io.MouseWheel), 1f, MaxTimelineZoom);
+                span = duration / timelineZoom;
+                timelineStart = mouseTime - (mouse.X - origin.X - gutter - pad) / inner * span;
+            }
+            else
+            {
+                timelineStart -= io.MouseWheel * span * 0.15;
+            }
 
-        var tooltip = new List<string>();
+            timelineStart = Math.Clamp(timelineStart, 0, duration - span);
+        }
+
+        if (ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Left, 2f) && timelineZoom > 1f)
+        {
+            timelineStart = Math.Clamp(timelineStart - io.MouseDelta.X / inner * span, 0, duration - span);
+            ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeEw);
+        }
+
+        dl.AddRectFilled(origin, origin + new Vector2(width, height), Theme.U32(Theme.Panel, 0.8f), Theme.Px(4));
+        dl.PushClipRect(new Vector2(left, origin.Y), new Vector2(rightEdge, origin.Y + height), true);
+        // A line every minute; zoomed in enough, a fainter one every 10 s.
+        var step = span <= 90 ? 10 : 60;
+        for (var t = step; t < duration; t += step)
+        {
+            if (X(t) < left || X(t) > rightEdge)
+                continue;
+            var minute = t % 60 == 0;
+            dl.AddLine(new Vector2(X(t), origin.Y + Theme.Px(2)), new Vector2(X(t), origin.Y + height - Theme.Px(2)), Theme.U32(Theme.Line, minute ? 0.6f : 0.3f), 1f);
+        }
+
+        dl.PopClipRect();
+
+        var tooltip = new List<System.Action>();
         var y = origin.Y + Theme.Px(2);
         for (var i = 0; i < lanes.Count; i++)
         {
@@ -275,28 +340,41 @@ public sealed partial class MainWindow
             }
 
             var mid = top + lane.Height / 2;
-            var laneHovered = hovered && mouse.Y >= top && mouse.Y < bottom;
+            var laneHovered = hovered && mouse.Y >= top && mouse.Y < bottom && mouse.X >= left;
+            dl.PushClipRect(new Vector2(left, top), new Vector2(rightEdge, bottom), true);
             if (lane.Mark != TimelineMark.Icon)
-                dl.AddLine(new Vector2(X(0), mid), new Vector2(X(duration), mid), Theme.U32(Theme.Line, 0.5f), 1f);
+                dl.AddLine(new Vector2(Math.Max(left, X(0)), mid), new Vector2(Math.Min(rightEdge, X(duration)), mid), Theme.U32(Theme.Line, 0.5f), 1f);
 
             var radius = Theme.Px(4);
             for (var k = 0; k < lane.Marks.Count; k++)
             {
                 var (at, icon, text) = lane.Marks[k];
                 var x = X(at);
+                if (x < left - iconSize || x > rightEdge + iconSize)
+                    continue;
                 switch (lane.Mark)
                 {
                     case TimelineMark.Dot:
                         dl.AddCircleFilled(new Vector2(x, mid), radius, Theme.U32(lane.Color));
                         if (laneHovered && Math.Abs(mouse.X - x) <= Theme.Px(6))
-                            tooltip.Add($"{NumberFormat.Duration(TimeSpan.FromSeconds(at))}  {text}");
+                        {
+                            if (lane.DrawTip is { } draw)
+                            {
+                                var index = k;
+                                tooltip.Add(() => draw(index));
+                            }
+                            else
+                            {
+                                tooltip.Add(TipText(at, text));
+                            }
+                        }
                         break;
 
                     case TimelineMark.Diamond:
                         dl.AddQuadFilled(new Vector2(x, mid - radius), new Vector2(x + radius, mid), new Vector2(x, mid + radius),
                                          new Vector2(x - radius, mid), Theme.U32(lane.Color));
                         if (laneHovered && Math.Abs(mouse.X - x) <= Theme.Px(6))
-                            tooltip.Add($"{NumberFormat.Duration(TimeSpan.FromSeconds(at))}  {text}");
+                            tooltip.Add(TipText(at, text));
                         break;
 
                     default:
@@ -305,31 +383,139 @@ public sealed partial class MainWindow
                             ActionIcons.DrawAt(dl, icon, pos, iconSize);
                         else
                             dl.AddRectFilled(pos, pos + new Vector2(iconSize, iconSize), Theme.U32(Theme.SurfaceActive), iconSize * 0.15f);
-                        if (hovered && mouse.X >= pos.X && mouse.X <= pos.X + iconSize && mouse.Y >= pos.Y && mouse.Y <= pos.Y + iconSize)
-                            tooltip.Add($"{NumberFormat.Duration(TimeSpan.FromSeconds(at))}  {text}");
+                        if (hovered && mouse.X >= Math.Max(left, pos.X) && mouse.X <= pos.X + iconSize && mouse.Y >= pos.Y && mouse.Y <= pos.Y + iconSize)
+                            tooltip.Add(TipText(at, text));
                         break;
                 }
             }
 
+            dl.PopClipRect();
             y = bottom;
         }
 
-        ImGui.SetCursorScreenPos(new Vector2(origin.X, origin.Y + height + ImGui.GetStyle().ItemSpacing.Y));
-        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + gutter);
-        ImGui.TextColored(Theme.TextFaint, "0:00");
-        var end = NumberFormat.Duration(TimeSpan.FromSeconds(pull.DurationSeconds));
-        ImGui.SameLine(width - ImGui.CalcTextSize(end).X);
+        // A line following the mouse across the lanes, with its time: what happened at that moment, lane by lane.
+        if (hovered && mouse.X >= Math.Max(left, X(0)) && mouse.X <= Math.Min(rightEdge, X(duration)))
+        {
+            dl.AddLine(new Vector2(mouse.X, origin.Y), new Vector2(mouse.X, origin.Y + height), Theme.U32(Theme.Text, 0.5f), 1f);
+            var at = TimeAt(mouse.X);
+            var label = NumberFormat.Duration(TimeSpan.FromSeconds(at));
+            var size = ImGui.CalcTextSize(label);
+            var labelPos = new Vector2(Math.Min(mouse.X + Theme.Px(4), origin.X + width - size.X - Theme.Px(2)), origin.Y + height - size.Y - Theme.Px(1));
+            dl.AddRectFilled(labelPos - Theme.Px(new Vector2(2, 0)), labelPos + size + Theme.Px(new Vector2(2, 0)), Theme.U32(Theme.Panel, 0.9f), Theme.Px(3));
+            dl.AddText(labelPos, Theme.U32(Theme.Text), label);
+        }
+
+        // Zoomed in: a bar under the lanes showing which part of the pull is in view.
+        if (timelineZoom > 1f)
+        {
+            var barY = origin.Y + height + Theme.Px(2);
+            var barLeft = left + pad;
+            var barWidth = inner;
+            dl.AddRectFilled(new Vector2(barLeft, barY), new Vector2(barLeft + barWidth, barY + Theme.Px(3)), Theme.U32(Theme.Line, 0.5f), Theme.Px(2));
+            var from = barLeft + (float)(timelineStart / duration) * barWidth;
+            dl.AddRectFilled(new Vector2(from, barY), new Vector2(from + barWidth / timelineZoom, barY + Theme.Px(3)), Theme.U32(Theme.Gold, 0.8f), Theme.Px(2));
+        }
+
+        ImGui.SetCursorScreenPos(new Vector2(origin.X, origin.Y + height + Theme.Px(5) + ImGui.GetStyle().ItemSpacing.Y));
+        var rowX = ImGui.GetCursorPosX();
+        ImGui.SetCursorPosX(rowX + gutter);
+        ImGui.TextColored(Theme.TextFaint, NumberFormat.Duration(TimeSpan.FromSeconds(timelineStart)));
+
+        // Zoom, in the middle of the time row.
+        var buttons = ImGui.GetFrameHeight() * 3 + Theme.Px(4);
+        ImGui.SameLine(rowX + gutter + (width - gutter - buttons) / 2);
+        if (Theme.IconButton("tlzoomout", FontAwesomeIcon.SearchMinus, Loc.T("Zoom out")))
+            timelineZoom = Math.Max(1f, timelineZoom / 1.5f);
+        ImGui.SameLine(0, Theme.Px(2));
+        if (Theme.IconButton("tlzoomin", FontAwesomeIcon.SearchPlus, Loc.T("Zoom in (Ctrl + wheel). Zoomed in, the wheel or a drag moves along the pull.")))
+        {
+            var centre = timelineStart + span / 2;
+            timelineZoom = Math.Min(MaxTimelineZoom, timelineZoom * 1.5f);
+            timelineStart = centre - duration / timelineZoom / 2;
+        }
+
+        ImGui.SameLine(0, Theme.Px(2));
+        if (Theme.IconButton("tlzoomreset", FontAwesomeIcon.Expand, Loc.T("Whole pull")))
+            timelineZoom = 1f;
+        var end = NumberFormat.Duration(TimeSpan.FromSeconds(Math.Min(duration, timelineStart + span)));
+        ImGui.SameLine(rowX + width - ImGui.CalcTextSize(end).X);
         ImGui.TextColored(Theme.TextFaint, end);
 
         if (tooltip.Count > 0)
-            ImGui.SetTooltip(string.Join("\n", tooltip));
+        {
+            using var tip = ImRaii.Tooltip();
+            foreach (var draw in tooltip)
+                draw();
+        }
     }
+
+    private static System.Action TipText(double at, string text) =>
+        () => ImGui.TextUnformatted($"{NumberFormat.Duration(TimeSpan.FromSeconds(at))}  {text}");
 
     private enum TimelineMark { Dot, Diamond, Icon }
 
+    // The enemies' attacks: purple.
+    private static readonly Vector4 BossColor = new(0.72f, 0.48f, 0.98f, 1f);
+
+    private static readonly Dictionary<uint, string> EnglishActionNames = new();
+
+    private static string EnglishName(uint actionId)
+    {
+        if (!EnglishActionNames.TryGetValue(actionId, out var name))
+        {
+            name = Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Action>(Dalamud.Game.ClientLanguage.English)
+                         .TryGetRow(actionId, out var row) ? row.Name.ExtractText() : string.Empty;
+            EnglishActionNames[actionId] = name;
+        }
+
+        return name;
+    }
+
+    // An enemy attack: its name and who cast it.
+    private static string BossAttackTitle(BossCast cast) =>
+        cast.Caster.Length > 0 ? $"{CastName(cast)} ({cast.Caster})" : CastName(cast);
+
+    // An enemy attack in a tooltip: its time and name, then the mitigations up when it landed, each with its icon.
+    private static void DrawBossAttackTip(PullRecord pull, BossCast cast)
+    {
+        var landed = cast.AtSeconds + cast.CastSeconds;
+        ImGui.TextUnformatted($"{NumberFormat.Duration(TimeSpan.FromSeconds(landed))}  {BossAttackTitle(cast)}");
+        var up = MitigationDurations.ActiveAt(pull.Mitigations, landed, u => EnglishName(u.ActionId));
+        if (up.Count == 0)
+        {
+            if (pull.Mitigations.Count > 0)
+                ImGui.TextColored(Theme.TextMuted, Loc.T("No mitigation up when it landed."));
+            return;
+        }
+
+        ImGui.TextColored(Theme.TextMuted, Loc.T("Mitigations up when it landed:"));
+        foreach (var u in up)
+            DrawMitigationLine(u);
+    }
+
+    // A mitigation in a tooltip: its icon, its name, who used it (and on whom, when on another party member).
+    private static void DrawMitigationLine(MitigationUse u)
+    {
+        var size = ImGui.GetTextLineHeight();
+        ImGui.Dummy(new Vector2(Theme.Px(6), size));
+        ImGui.SameLine(0, 0);
+        ActionIcons.Draw(ActionIcons.OfAction(u.ActionId), size);
+        ImGui.SameLine(0, Theme.Px(5));
+        ImGui.TextUnformatted(GameNames.Action(u.ActionId, u.Action));
+        ImGui.SameLine(0, Theme.Px(5));
+        var who = Names.Show(u.Player);
+        if (u.Target.Length > 0 && u.Target != u.Player)
+            who += $" → {Names.Show(u.Target)}";
+        ImGui.TextColored(Theme.TextMuted, who);
+    }
+
     /// <summary>A row of the timeline: a glyph or a job at its left, then its marks (time, icon, tooltip).</summary>
     private sealed record TimelineLane(
-        FontAwesomeIcon? Glyph, string? Job, float Height, Vector4 Color, TimelineMark Mark, List<(double At, uint Icon, string Text)> Marks);
+        FontAwesomeIcon? Glyph, string? Job, float Height, Vector4 Color, TimelineMark Mark, List<(double At, uint Icon, string Text)> Marks)
+    {
+        /// <summary>Draws the tooltip of a mark (by its index) instead of its text: icons and all.</summary>
+        public System.Action<int>? DrawTip { get; init; }
+    }
 
     // Places icons along a lane, one row lower when they would overlap the one before; the row of each, in order.
     private static List<(int Row, float Left)> PackIcons(List<(double At, uint Icon, string Text)> marks, Func<double, float> x, float size)
