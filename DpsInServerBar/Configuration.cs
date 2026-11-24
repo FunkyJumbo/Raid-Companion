@@ -367,6 +367,19 @@ public sealed class Configuration : IPluginConfiguration
     [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
     public List<Tracking.MitigationPlan> MitigationPlans { get; set; } = [];
 
+    /// <summary>Best in slot gear sets, every job.</summary>
+    [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+    public List<Gear.GearSet> GearSets { get; set; } = [];
+
+    /// <summary>The gear set tracked for each job (English abbreviation to set id).</summary>
+    public Dictionary<string, string> GearTracked { get; set; } = new();
+
+    /// <summary>Frame the items of the tracked gear sets in the game's windows (inventory, shops, loot).</summary>
+    public bool GearHighlight { get; set; } = true;
+
+    /// <summary>Name the gear sets holding an item in the game's item tooltip.</summary>
+    public bool GearTooltip { get; set; } = true;
+
     /// <summary>Mitigation plan shown for each fight (territory id to plan id).</summary>
     public Dictionary<uint, string> MitigationPlanSelected { get; set; } = new();
 

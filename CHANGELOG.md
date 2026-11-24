@@ -3,6 +3,13 @@
 <!-- One "## <version>" section per release. The Release workflow publishes the section of the tagged
      version as the GitHub release notes; the same notes go into pluginmaster.json (shown in Dalamud). -->
 
+## 1.0.10.0
+
+- BiS gearsets (Live): your best in slot sets per job, made in an editor (items up to an item level, materia, food, relic stats, notes) or imported from xivgear.app and etro.gg.
+- What you own of the tracked set and what is missing, its stats (secondary stats, meld caps, food, GCD) and the relic's stats checked.
+- The set's items lit in your inventory, armoury chest, saddlebag and retainer, what you lack lit in shops and the loot, and the sets named in the game's item tooltip.
+- Various UI changes and adjustments.
+
 ## 1.0.9.0
 
 - History, Personal: your rotation in the pull, as a timeline of your GCDs, oGCDs and potions (pre-pull included), with zoom.

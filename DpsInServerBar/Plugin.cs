@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.IoC;
@@ -38,6 +39,8 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static ITextureProvider TextureProvider { get; private set; } = null!;
     [PluginService] internal static ITextureReadbackProvider TextureReadback { get; private set; } = null!;
     [PluginService] internal static IJobGauges JobGauges { get; private set; } = null!;
+    [PluginService] internal static IGameGui GameGui { get; private set; } = null!;
+    [PluginService] internal static IAddonLifecycle AddonLifecycle { get; private set; } = null!;
 
     private readonly WindowSystem windowSystem = new("DpsInServerBar");
     private readonly MainWindow mainWindow;
@@ -46,6 +49,9 @@ public sealed class Plugin : IDalamudPlugin
     private readonly OpenerWindow openerWindow;
     private readonly OpenerEditorWindow openerEditorWindow;
     private readonly MitigationWindow mitigationWindow;
+    private readonly GearWindow gearWindow;
+    private readonly Gear.GearHighlighter gearHighlighter;
+    private readonly Gear.GearItemDetail gearItemDetail;
     private readonly UI.AlBhedChat alBhedChat;
     private readonly UI.AlBhedSender alBhedSender;
     private readonly OpenerCompactWindow openerCompactWindow;
@@ -116,6 +122,16 @@ public sealed class Plugin : IDalamudPlugin
         windowSystem.AddWindow(mitigationWindow);
         windowSystem.AddWindow(mitigationPlanWindow);
         windowSystem.AddWindow(openerCompactWindow);
+        gearWindow = new GearWindow(this);
+        windowSystem.AddWindow(gearWindow);
+        // The set tracked for the job you play is lit in the game's windows; every set is named in the item tooltip.
+        gearHighlighter = new Gear.GearHighlighter(
+            GameGui,
+            () => Configuration.GearTracked.TryGetValue(Gear.GearCatalog.CurrentJob(), out var id)
+                      ? Configuration.GearSets.Where(s => s.Id == id)
+                      : [],
+            () => Configuration.GearHighlight);
+        gearItemDetail = new Gear.GearItemDetail(AddonLifecycle, GameGui, () => Configuration.GearSets, () => Configuration.GearTooltip);
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
@@ -186,6 +202,8 @@ public sealed class Plugin : IDalamudPlugin
         alBhedChat.Dispose();
         alBhedSender.Dispose();
         OpenerTracker.Dispose();
+        gearItemDetail.Dispose();
+        gearHighlighter.Dispose();
         Tracker.Dispose();
     }
 
@@ -278,6 +296,16 @@ public sealed class Plugin : IDalamudPlugin
     /// <summary>Opens the main window on a pull in History (chat summary link).</summary>
     public void ShowPull(Guid pullId) => mainWindow.ShowPull(pullId);
 
+    public bool GearOpen => gearWindow.IsOpen;
+
+    public void ToggleGear()
+    {
+        if (gearWindow.IsOpen)
+            gearWindow.IsOpen = false;
+        else
+            gearWindow.Show();
+    }
+
     public bool MitigationOpen => mitigationWindow.IsOpen;
 
     public void ToggleMitigation()
@@ -362,6 +390,7 @@ public sealed class Plugin : IDalamudPlugin
         Dots.Update();
         Combos.Update();
         FightLog.Update();
+        gearHighlighter.Update();
 
         // The bar only needs a few refreshes per second; the tracker publishes roughly once per second.
         var now = DateTime.UtcNow;
@@ -449,6 +478,10 @@ public sealed class Plugin : IDalamudPlugin
                 break;
             case "opener full":
                 ToggleOpenerView(compact: false);
+                break;
+            case "bis":
+            case "gear":
+                ToggleGear();
                 break;
             case "opener edit":
             case "opener editor":

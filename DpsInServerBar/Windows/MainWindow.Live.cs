@@ -95,7 +95,7 @@ public sealed partial class MainWindow
     {
         static float ChipWidth(string label) => ImGui.CalcTextSize(label).X + Theme.Px(20);
         var width = ChipWidth(Loc.T("Compact view")) + ChipWidth(Loc.T("Opener practice")) + ChipWidth(Loc.T("Mitigation plans"))
-                    + ImGui.GetStyle().ItemSpacing.X * 2;
+                    + ChipWidth(Loc.T("BiS gearset")) + ImGui.GetStyle().ItemSpacing.X * 3;
         if (ImGui.GetContentRegionAvail().X < width)
             ImGui.NewLine(); // no room right of the title: on their own line
         var x = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - width;
@@ -114,10 +114,16 @@ public sealed partial class MainWindow
             ImGui.SetTooltip(Loc.T("Practice your job's opener: each action used in the right order is checked off."));
 
         ImGui.SameLine();
+        if (Theme.Chip(Loc.T("BiS gearset"), plugin.GearOpen))
+            plugin.ToggleGear();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(Loc.T("Your best in slot sets: what you own of them and what is missing, framed in your inventory, the shops and the loot."));
+        ImGui.SameLine();
         if (Theme.Chip(Loc.T("Mitigation plans"), plugin.MitigationOpen))
             plugin.ToggleMitigation();
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(Loc.T("Who mitigates what for each cast of the fight. During a pull, the cast in progress and the next one are lit."));
+
     }
 
     /// <summary>The key figures of the fight in progress, one card each.</summary>

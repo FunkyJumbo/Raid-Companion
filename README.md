@@ -339,6 +339,38 @@ the casts where it has something), the check of your mitigations, its background
 
 <br>
 
+## BiS gearsets
+
+Your best in slot sets, per job. Open it with **BiS gearset** in Live (or `/raidcompanion bis`); it opens on the job
+you play.
+
+- **Sets**: pick the job, then a set among its sets (several per job: a savage tier, an ultimate...). Looking at a set
+  does not track it: the **target** button at its right tracks the set shown (marked "tracked" in the list), the one
+  lit in the game's windows. **+** makes one, the copy button duplicates it, the bin deletes it (hold Ctrl).
+- **Import**: paste a link of [xivgear.app](https://xivgear.app) (a set, a whole sheet, or one of its best in slot
+  lists) or [etro.gg](https://etro.gg) and click **Import**: every set of the link is added.
+- **Tracker**: each piece of the set with its item level, whether you have it (equipped, armoury chest, inventory or
+  saddlebag) or it is missing, and its materia, lit once melded in the right slot of your copy; the pieces owned, the
+  materia melded and the average item level above it, the food and the notes below it.
+- **Stats**: the set's main and secondary stats at level 100 (critical hit, determination, direct hit, speed, tenacity,
+  piety), from the gear, the materia and the food, what the meld caps cut, and what each one gives (critical hit rate
+  and damage, direct hit rate, determination's bonus, GCD, tenacity's bonus, MP regained).
+- **Item tooltips**: hover an item (in the set, the editor or the search list) for its item level, weapon damage, stats
+  and materia slots, and for a piece of the set what each materia adds; a materia shows its stat, a meal its bonuses.
+- **Edit**: the name, the highest item level of the lists (0: no limit), for each slot the item (a list of what the job
+  can wear there, searchable), its materia (up to five for an item that can be overmelded) and a note, the food and a
+  note for the whole set. Right click an item or materia to clear it.
+- **Relics**: a relic whose secondary stats you choose gets them in the editor (imported from xivgear too). The tracker
+  counts it once your relic has them: they are worked out from your character's stats (the relic equipped, on the
+  job, at level 100, outside a duty), and the last check is kept.
+- **Light up in game windows**: the set tracked for the job you play lit in the game's own windows: its pieces, its
+  food and the materia still to meld, in green in your inventory, armoury chest, saddlebag and retainer (the slot's
+  real item is read, so a look-alike stays unlit); in shops and the loot window, in gold what you still lack.
+- **Sets in item tooltips**: the game's item tooltip names, under the item's name, the sets holding it (every job), with
+  how many of it when more than one (materia).
+
+<br>
+
 ## Opener practice
 
 <p align="center">
@@ -406,6 +438,7 @@ The other player pastes it in their editor and presses **Import**.
 | `/raidcompanion opener compact` | Open / close the opener practice in its compact view |
 | `/raidcompanion opener full` | Open / close the opener practice in its full window |
 | `/raidcompanion opener edit` | Open the opener editor: make, change and share your openers |
+| `/raidcompanion bis` | Open / close the BiS gearsets |
 
 `/rcomp` is a shorter alias (e.g. `/rcomp preset 2`, handy in a macro). The old `/dpsbar` still works, so existing
 macros keep working.
@@ -453,7 +486,8 @@ during combat.
 - Screenshots go to `Pictures\Raid Companion`, only when you ask for one.
 - Settings are kept in the plugin's configuration file, like any other Dalamud plugin setting.
 
-**Network.** None: the plugin makes no network connection at all.
+**Network.** None, except when you import a gear set: the plugin then downloads that set from the site of the link
+(xivgear.app or etro.gg). Nothing about you is sent, and nothing else ever goes online.
 
 
 <br>
@@ -554,8 +588,11 @@ about 1% on a single pull, less after a few pulls with the same group.
 - [FFLogs](https://www.fflogs.com/) for the rDPS method.
 - [The Balance](https://www.thebalanceffxiv.com/) for the openers and their notes.
 - [LootView](https://github.com/GitHixy/LootView), whose midnight-blue and gold interface inspired ours.
+- [BisBuddy](https://github.com/RajahOmen/BisBuddy) (and haselnussbomber) for how to light the items of a gear set in the
+  game's inventories and exchange shops, and [xivgear.app](https://xivgear.app) and [etro.gg](https://etro.gg) for the
+  gear sets imported.
 
-This project is not affiliated with FFLogs, Archon, The Balance or Square Enix.
+This project is not affiliated with FFLogs, Archon, The Balance, xivgear.app, etro.gg or Square Enix.
 
 <br>
 
