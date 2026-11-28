@@ -12,10 +12,16 @@ namespace DpsInServerBar.UI;
 /// The plugin's look: a dark translucent background, an accent color and rounded frames (midnight blue and gold by default, other themes in the Appearance settings).
 /// Push it around a window (PreDraw / PostDraw) so the frame and title bar get it too.
 /// </summary>
-public static class Theme
+public static partial class Theme
 {
     // Palette: the colors of the selected theme (Appearance settings), the shades derived from them.
     private static ThemePalette palette = ThemePalette.For(ThemePreset.Midnight);
+
+    // A theme change: the colors pass from the old theme (from) to the new one (target), a light sweeping the windows.
+    private static ThemePalette target = palette;
+    private static ThemePalette? from;
+    private static readonly ThemePalette Blend = new();
+    private static string? paletteKey;
     private static float opacity = 0.96f;
 
     /// <summary>The glass effect, on any theme: see-through frosted windows, the game blurred behind them, light rims.</summary>
@@ -24,7 +30,7 @@ public static class Theme
     private static float glassBlur = 8f;
 
     // Glass: how much of the window lets the (blurred) game through, and the white of its rims and frosted fields.
-    private const float GlassWindow = 0.42f;
+    private const float GlassWindow = 0.48f;
     private static readonly Vector4 Frost = new(1, 1, 1, 1);
 
     /// <summary>Window background, at the opacity chosen in the settings (Glass: never more than see-through).</summary>
@@ -66,12 +72,30 @@ public static class Theme
     /// <summary>Applies the theme and background opacity chosen in the settings.</summary>
     public static void Configure(Configuration config)
     {
-        palette = config.ActivePalette;
+        // Another theme picked (not a color edited): the colors pass to it.
+        var key = $"{config.ThemePreset}:{config.SavedThemeIndex}";
+        if (paletteKey is not null && key != paletteKey && config.Animations)
+        {
+            from = palette.Copy();
+            ThemeSweep.Started = (float)ImGui.GetTime();
+        }
+
+        paletteKey = key;
+        target = config.ActivePalette;
+        palette = from is null ? target : palette;
         hiddenSections = config.HiddenSections;
         saveSections = config.Save;
         opacity = Math.Clamp(config.BackgroundOpacity, 0.2f, 1f);
         glassBlur = Math.Clamp(config.GlassBlur, 0f, 12f);
         Glass = config.GlassEffect;
+        TextOutline.Enabled = config.GlassEffect && config.TextOutline;
+        var dark = config.ActivePalette.Background;
+        TextOutline.Color = new Vector3(dark.X, dark.Y, dark.Z) * 0.35f;
+        Fx.Enabled = config.Animations;
+        Ambience.Enabled = config.ThemeAmbience;
+        Ambience.FollowGame = config.GameAmbience;
+        Backdrop.Enabled = config.ViewBackdrops;
+        Ambience.Preset = config.SavedThemeIndex >= 0 && config.SavedThemeIndex < config.SavedThemes.Count ? ThemePreset.Custom : config.ThemePreset;
     }
 
     public static Vector4 Mix(Vector4 a, Vector4 b, float t) => a + (b - a) * t;
@@ -93,7 +117,88 @@ public static class Theme
     public static uint U32(Vector4 c, float a = 1f) => ImGui.GetColorU32(Alpha(c, a));
 
     /// <summary>Pushes the colors and metrics of the theme. Dispose to restore Dalamud's style.</summary>
-    public static IDisposable Push() => Glass ? PushGlass() : PushSolid();
+    public static IDisposable Push()
+    {
+        BlendColors();
+        return Glass ? PushGlass() : PushSolid();
+    }
+
+    // During a theme change: each color between the old theme's and the new one's.
+    private static void BlendColors()
+    {
+        if (from is null)
+            return;
+        var k = Fx.EaseOut((Fx.Now - ThemeSweep.Started) / ThemeSweep.Duration);
+        if (k >= 1 || !Fx.Enabled)
+        {
+            from = null;
+            palette = target;
+            return;
+        }
+
+        Blend.Background = Mix(from.Background, target.Background, k);
+        Blend.Surface = Mix(from.Surface, target.Surface, k);
+        Blend.Accent = Mix(from.Accent, target.Accent, k);
+        Blend.Secondary = Mix(from.Secondary, target.Secondary, k);
+        Blend.Text = Mix(from.Text, target.Text, k);
+        Blend.Good = Mix(from.Good, target.Good, k);
+        Blend.Warn = Mix(from.Warn, target.Warn, k);
+        Blend.Bad = Mix(from.Bad, target.Bad, k);
+        Blend.Tank = Mix(from.Tank, target.Tank, k);
+        Blend.Healer = Mix(from.Healer, target.Healer, k);
+        Blend.Dps = Mix(from.Dps, target.Dps, k);
+        palette = Blend;
+    }
+
+    /// <summary>
+    /// A table (as ImRaii.Table) that the theme's ambience stays behind: no particle shows over it, as if it were
+    /// above them.
+    /// </summary>
+    public static ThemeTable Table(string id, int columns, ImGuiTableFlags flags = ImGuiTableFlags.None, Vector2 outerSize = default, float innerWidth = 0f) =>
+        new(ImRaii.Table(id, columns, flags, outerSize, innerWidth));
+
+    public ref struct ThemeTable
+    {
+        private ImRaii.TableDisposable table;
+
+        public ThemeTable(ImRaii.TableDisposable table) => this.table = table;
+
+        public readonly bool Success => table.Success;
+
+        public static implicit operator bool(ThemeTable t) => t.Success;
+
+        public void Dispose()
+        {
+            var shown = table.Success;
+            table.Dispose();
+            if (shown)
+                Ambience.Occlude(ImGui.GetItemRectMin(), ImGui.GetItemRectMax());
+        }
+    }
+
+    /// <summary>The theme for a window, fading in when it opens.</summary>
+    public static IDisposable Push(string window)
+    {
+        var theme = Push();
+        var alpha = OpenFade.Alpha(window);
+        var scope = alpha >= 0.999f ? theme : new Both(ImRaii.PushStyle(ImGuiStyleVar.Alpha, alpha), theme);
+        // Disposed after the window is drawn: its text then gets its outline.
+        return new Both(scope, new Outlined(window));
+    }
+
+    private sealed class Outlined(string window) : IDisposable
+    {
+        public void Dispose() => TextOutline.Apply(window);
+    }
+
+    private sealed class Both(IDisposable first, IDisposable second) : IDisposable
+    {
+        public void Dispose()
+        {
+            first.Dispose();
+            second.Dispose();
+        }
+    }
 
     private static IDisposable PushSolid()
     {
@@ -135,7 +240,7 @@ public static class Theme
             .Push(ImGuiCol.TableRowBg, clear)
             .Push(ImGuiCol.TableRowBgAlt, Alpha(Surface, 0.45f))
             .Push(ImGuiCol.ScrollbarBg, clear)
-            .Push(ImGuiCol.ScrollbarGrab, Line)
+            .Push(ImGuiCol.ScrollbarGrab, ScrollGrab(Line))
             .Push(ImGuiCol.ScrollbarGrabHovered, Alpha(Crystal, 0.5f))
             .Push(ImGuiCol.ScrollbarGrabActive, Alpha(Crystal, 0.75f))
             .Push(ImGuiCol.PlotLines, Gold)
@@ -170,6 +275,7 @@ public static class Theme
     /// </summary>
     public static void BlurBehind(bool allowed = true)
     {
+        ThemeSweep.Draw();
         if (!Glass || !allowed || glassBlur <= 0)
             return;
 
@@ -201,7 +307,7 @@ public static class Theme
             .Push(ImGuiCol.TableBorderStrong, rim)
             .Push(ImGuiCol.TableBorderLight, Alpha(Frost, 0.07f))
             .Push(ImGuiCol.TableRowBgAlt, Alpha(Frost, 0.03f))
-            .Push(ImGuiCol.ScrollbarGrab, Alpha(Frost, 0.18f));
+            .Push(ImGuiCol.ScrollbarGrab, ScrollGrab(Alpha(Frost, 0.18f)));
         var styles = ImRaii.PushStyle(ImGuiStyleVar.WindowRounding, Px(14))
             .Push(ImGuiStyleVar.ChildRounding, Px(10))
             .Push(ImGuiStyleVar.FrameRounding, Px(8))
@@ -230,12 +336,6 @@ public static class Theme
     {
         using var font = ImRaii.PushFont(UiBuilder.IconFont);
         ImGui.TextColored(color ?? Text, icon.ToIconString());
-    }
-
-    public static float IconWidth(FontAwesomeIcon icon)
-    {
-        using var font = ImRaii.PushFont(UiBuilder.IconFont);
-        return ImGui.CalcTextSize(icon.ToIconString()).X;
     }
 
     /// <summary>Window header: gold icon, title, muted subtitle and a gold rule under it.</summary>
@@ -315,6 +415,8 @@ public static class Theme
         ImGui.Dummy(new Vector2(0, Px(4) + SectionSpacing));
         var dl = ImGui.GetWindowDrawList();
         var pos = ImGui.GetCursorScreenPos();
+        // When the window opens, the sections appear one after the other: the dash grows, the title slides in.
+        var shown = SectionCascade.Next(label);
         var lineHeight = ImGui.GetTextLineHeight();
         var lineY = pos.Y + lineHeight / 2;
 
@@ -335,23 +437,34 @@ public static class Theme
             if (hovered)
             {
                 ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-                ImGui.SetTooltip(folded == true ? Loc.T("Show this section") : Loc.T("Hide this section"));
+                Theme.Tooltip(folded == true ? Loc.T("Show this section") : Loc.T("Hide this section"));
             }
         }
 
-        var alpha = hovered ? 1f : 0.8f;
+        var alpha = (hovered ? 1f : 0.8f) * (0.1f + 0.9f * shown);
         var thickness = hovered ? 2f : 1.5f;
-        dl.AddLine(new Vector2(pos.X, lineY), new Vector2(pos.X + Px(12), lineY), U32(Gold, alpha), thickness);
+        dl.AddLine(new Vector2(pos.X, lineY), new Vector2(pos.X + Px(12) * (0.2f + 0.8f * shown), lineY), U32(Gold, alpha), thickness);
+        if (shown < 1)
+        {
+            // A gold line running under the title as it appears.
+            var reach = Px(18) + ImGui.CalcTextSize(label).X + Px(30);
+            dl.AddLine(new Vector2(pos.X, lineY + lineHeight * 0.7f), new Vector2(pos.X + reach * shown, lineY + lineHeight * 0.7f),
+                       U32(Gold, 0.5f * (1 - shown)), 1f);
+        }
         if (folded == true)
             dl.AddLine(new Vector2(pos.X + Px(6), lineY - Px(6)), new Vector2(pos.X + Px(6), lineY + Px(6)), U32(Gold, alpha), thickness);
-        ImGui.SetCursorScreenPos(new Vector2(pos.X + Px(18), pos.Y));
-        if (icon is { } glyph)
+        ImGui.SetCursorScreenPos(new Vector2(pos.X + Px(18) + (1 - shown) * Px(14), pos.Y));
+        using (ImRaii.PushStyle(ImGuiStyleVar.Alpha, ImGui.GetStyle().Alpha * (0.05f + 0.95f * shown)))
         {
-            Icon(glyph, Gold);
-            ImGui.SameLine();
+            if (icon is { } glyph)
+            {
+                Icon(glyph, Gold);
+                ImGui.SameLine();
+            }
+
+            ImGui.TextColored(Gold, label.ToUpperInvariant());
         }
 
-        ImGui.TextColored(Gold, label.ToUpperInvariant());
         if (help is not null)
             HelpMarker(help);
         if (SectionTitleGap is { } gap)
@@ -374,12 +487,7 @@ public static class Theme
         ImGui.SameLine();
         Icon(FontAwesomeIcon.QuestionCircle, TextFaint);
         if (ImGui.IsItemHovered())
-        {
-            using var tooltip = ImRaii.Tooltip();
-            ImGui.PushTextWrapPos(Px(380));
-            ImGui.TextUnformatted(text);
-            ImGui.PopTextWrapPos();
-        }
+            Tooltip(text, Px(380));
     }
 
     /// <summary>Header row of a table: white text on the accent color (toned down so the text stays readable).</summary>
@@ -411,7 +519,10 @@ public static class Theme
             .Push(ImGuiCol.ButtonHovered, GoldBright)
             .Push(ImGuiCol.ButtonActive, GoldDim)
             .Push(ImGuiCol.Text, Ink with { W = 1f });
-        return ImGui.Button(label, size);
+        var clicked = ImGui.Button(label, size);
+        HoverLight.OnItem();
+        Ripple.OnItem(clicked);
+        return clicked;
     }
 
     /// <summary>Outlined button for secondary actions.</summary>
@@ -422,7 +533,10 @@ public static class Theme
             .Push(ImGuiCol.ButtonActive, Alpha(Gold, 0.26f))
             .Push(ImGuiCol.Border, Alpha(Gold, 0.55f));
         using var border = ImRaii.PushStyle(ImGuiStyleVar.FrameBorderSize, 1f);
-        return ImGui.Button(label, size);
+        var clicked = ImGui.Button(label, size);
+        HoverLight.OnItem();
+        Ripple.OnItem(clicked);
+        return clicked;
     }
 
     /// <summary>A button showing only a FontAwesome glyph, with a tooltip.</summary>
@@ -483,8 +597,11 @@ public static class Theme
             clicked = ImGui.Button($"{icon.ToIconString()}##{id}");
         }
 
+        HoverLight.OnItem();
+        Ripple.OnItem(clicked);
+
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(tooltip);
+            Theme.Tooltip(tooltip);
         return clicked;
     }
 
@@ -514,7 +631,7 @@ public static class Theme
         var y = pos.Y + pad.Y;
         dl.AddText(new Vector2(pos.X + pad.X, y), U32(TextMuted), caption.ToUpperInvariant());
         y += line + Px(1);
-        dl.AddText(font, valueSize, new Vector2(pos.X + pad.X, y), U32(valueColor ?? Text), value);
+        RollingText.Draw(dl, font, valueSize, new Vector2(pos.X + pad.X, y), U32(valueColor ?? Text), value, ImGui.GetID($"card:{caption}"));
         y += valueSize + Px(1);
         if (hint is not null)
             dl.AddText(new Vector2(pos.X + pad.X, y), U32(hintColor ?? TextFaint), hint);
@@ -550,6 +667,7 @@ public static class Theme
         var pos = ImGui.GetCursorScreenPos();
         var clicked = ImGui.InvisibleButton($"##chip{label}", size);
         var hovered = ImGui.IsItemHovered();
+        Ripple.OnItem(clicked);
 
         var dl = ImGui.GetWindowDrawList();
         var max = pos + size;
@@ -571,6 +689,8 @@ public static class Theme
             dl.AddRectFilled(pos, max, U32(hovered ? SurfaceHover : Surface), rounding);
         }
 
+        if (hovered)
+            HoverLight.Draw(pos, max);
         dl.AddText(pos + Px(new Vector2(10, 4)), U32(on ? Lighten(color, 0.4f) : TextMuted), text);
         return clicked;
     }
@@ -578,10 +698,17 @@ public static class Theme
     /// <summary>
     /// Pills to switch between views, with a gold underline on the selected one. Returns true when it changed.
     /// </summary>
+    private static readonly Dictionary<uint, (Vector2 Min, Vector2 Max)> TabSelections = new();
+
     public static bool TabStrip(string id, ref int selected, params (FontAwesomeIcon Icon, string Label)[] tabs)
     {
         var changed = false;
         var dl = ImGui.GetWindowDrawList();
+        // The texts over the selection drawn after them (it glides from tab to tab).
+        dl.ChannelsSplit(2);
+        dl.ChannelsSetCurrent(1);
+        var window = ImGui.GetWindowPos();
+        var target = (Min: Vector2.Zero, Max: Vector2.Zero);
         for (var i = 0; i < tabs.Length; i++)
         {
             if (i > 0)
@@ -608,13 +735,15 @@ public static class Theme
             var max = pos + size;
             if (isSelected)
             {
-                dl.AddRectFilled(pos, max, U32(Gold, 0.12f), Px(Radius));
-                dl.AddRectFilled(new Vector2(pos.X + Px(8), max.Y - Px(2)), new Vector2(max.X - Px(8), max.Y), U32(Gold));
+                target = (pos - window, max - window);
             }
             else if (hovered)
             {
                 dl.AddRectFilled(pos, max, U32(SurfaceHover, 0.7f), Px(Radius));
             }
+
+            if (hovered)
+                HoverLight.Draw(pos, max);
 
             var color = isSelected ? GoldBright : hovered ? Text : TextMuted;
             var textPos = pos + Px(new Vector2(14, 6));
@@ -623,6 +752,20 @@ public static class Theme
             dl.AddText(textPos + new Vector2(glyphWidth + Px(8), 0), U32(color), label);
         }
 
+        // The selection, where it was last frame moving toward the tab selected (in the window: it follows a move).
+        var key = ImGui.GetID($"tabs:{id}");
+        var rect = TabSelections.TryGetValue(key, out var shown) && Fx.Enabled
+                       ? (Min: Vector2.Lerp(shown.Min, target.Min, Math.Min(1f, Fx.Delta * 14f)), Max: Vector2.Lerp(shown.Max, target.Max, Math.Min(1f, Fx.Delta * 14f)))
+                       : target;
+        TabSelections[key] = rect;
+        dl.ChannelsSetCurrent(0);
+        var (min, maxRect) = (rect.Min + window, rect.Max + window);
+        if (maxRect.X - min.X > Px(16))
+        {
+            dl.AddRectFilled(min, maxRect, U32(Gold, 0.12f), Px(Radius));
+            dl.AddRectFilled(new Vector2(min.X + Px(8), maxRect.Y - Px(2)), new Vector2(maxRect.X - Px(8), maxRect.Y), U32(Gold));
+        }
+        dl.ChannelsMerge();
         return changed;
     }
 

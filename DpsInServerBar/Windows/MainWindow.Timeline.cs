@@ -31,7 +31,7 @@ public sealed partial class MainWindow
             fightLogDebuffs = !fightLogDebuffs;
         ImGui.SameLine(0, Theme.Px(10));
         ImGui.SetNextItemWidth(Theme.Px(220));
-        ImGui.InputTextWithHint("##fightlogsearch", Loc.T("Search an action, a debuff or a player"), ref fightLogSearch, 64);
+        Theme.InputTextWithHint("##fightlogsearch", Loc.T("Search an action, a debuff or a player"), ref fightLogSearch, 64);
 
         bool Match(params string[] texts) =>
             fightLogSearch.Length == 0 || texts.Any(t => t.Contains(fightLogSearch, StringComparison.OrdinalIgnoreCase));
@@ -63,7 +63,7 @@ public sealed partial class MainWindow
 
         rows.Sort((a, b) => a.At.CompareTo(b.At));
         var height = Math.Min(Theme.Px(420), (rows.Count + 1) * ImGui.GetTextLineHeightWithSpacing() + Theme.Px(12));
-        using var table = ImRaii.Table("##fightlog", 7,
+        using var table = Theme.Table("##fightlog", 7,
                                        ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingStretchProp
                                        | ImGuiTableFlags.BordersOuterH, new Vector2(0, height));
         if (!table)
@@ -143,7 +143,7 @@ public sealed partial class MainWindow
                 ImGui.SameLine(0, Theme.Px(14));
             using (ImRaii.PushColor(ImGuiCol.Text, color))
             {
-                if (ImGui.Checkbox(label, ref value))
+                if (Theme.Checkbox(label, ref value))
                     changed = true;
             }
 
@@ -159,7 +159,7 @@ public sealed partial class MainWindow
         {
             config.TimelinePlanMisses = Toggle(Loc.F("Plan misses ({0})", planChecks.Count(c => !c.Used)), config.TimelinePlanMisses, Theme.Bad);
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(Loc.F("The skills of your column of the mitigation plan ({0}) not used in time, at the time their cast landed.", pull.PlanName));
+                Theme.Tooltip(Loc.F("The skills of your column of the mitigation plan ({0}) not used in time, at the time their cast landed.", pull.PlanName));
         }
 
         // On the right: a mitigation plan from the casts, and the table of the enemy casts and party debuffs.
@@ -174,7 +174,7 @@ public sealed partial class MainWindow
             if (Theme.Chip(planLabel, false))
                 plugin.NewMitigationPlan(pull);
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(Loc.T("A mitigation plan for this fight, made from the casts of this pull: pick the casts, then write which role uses which mitigation."));
+                Theme.Tooltip(Loc.T("A mitigation plan for this fight, made from the casts of this pull: pick the casts, then write which role uses which mitigation."));
         }
 
         if (pull.BossCasts.Count > 0 || pull.Debuffs.Count > 0)
@@ -184,7 +184,7 @@ public sealed partial class MainWindow
             if (Theme.Chip(label, showFightLog))
                 showFightLog = !showFightLog;
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(Loc.T("The casts of the enemies and the debuffs of the party members, with when they were applied and ran out, in a table under the timeline."));
+                Theme.Tooltip(Loc.T("The casts of the enemies and the debuffs of the party members, with when they were applied and ran out, in a table under the timeline."));
         }
         if (changed)
             config.Save();

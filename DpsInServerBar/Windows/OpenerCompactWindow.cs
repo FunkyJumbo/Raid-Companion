@@ -42,7 +42,8 @@ public sealed class OpenerCompactWindow : Window
     public override void PreDraw()
     {
         BgAlpha = Theme.WindowAlpha(plugin.Configuration.OpenerOpacity); // the background only, not the icons
-        themeScope = Theme.Push();
+        themeScope = Theme.Push(WindowName);
+        fadeScope = full.SuccessAlpha < 1 ? ImRaii.PushStyle(ImGuiStyleVar.Alpha, ImGui.GetStyle().Alpha * full.SuccessAlpha) : null;
         var scale = Scale;
         styleScope = ImRaii.PushStyle(ImGuiStyleVar.WindowRounding, Theme.Px(10) * scale)
                           .Push(ImGuiStyleVar.WindowPadding, Theme.Px(new Vector2(8, 7)) * scale)
@@ -60,6 +61,8 @@ public sealed class OpenerCompactWindow : Window
         colorScope = null;
         styleScope?.Dispose();
         styleScope = null;
+        fadeScope?.Dispose();
+        fadeScope = null;
         themeScope?.Dispose();
         themeScope = null;
     }
@@ -68,10 +71,15 @@ public sealed class OpenerCompactWindow : Window
     {
         shot.Step();
         Theme.BlurBehind(plugin.Configuration.OpenerOpacity > 0.05f);
+        if (plugin.Configuration.OpenerOpacity > 0.05f)
+            Backdrop.Draw(Backdrop.Kind.Hive); // not on a window made see-through
         ImGui.SetWindowFontScale(Scale);
         DrawMenu();
         full.DrawCompact();
+        full.DrawSuccess();
     }
+
+    private IDisposable? fadeScope;
 
     private float Scale => Math.Clamp(plugin.Configuration.OpenerCompactScale, 0.5f, 1.5f);
 
@@ -89,14 +97,14 @@ public sealed class OpenerCompactWindow : Window
         ImGui.SetWindowFontScale(1f);
         var size = (int)Math.Round(config.OpenerCompactScale * 100);
         ImGui.SetNextItemWidth(Theme.Px(140));
-        if (ImGui.SliderInt(Loc.T("Size"), ref size, 50, 150, "%d%%"))
+        if (Theme.SliderInt(Loc.T("Size"), ref size, 50, 150, "%d%%"))
             config.OpenerCompactScale = size / 100f;
         if (ImGui.IsItemDeactivatedAfterEdit())
             config.Save();
 
         var percent = (int)Math.Round(config.OpenerOpacity * 100);
         ImGui.SetNextItemWidth(Theme.Px(140));
-        if (ImGui.SliderInt(Loc.T("Background"), ref percent, 0, 100, "%d%%"))
+        if (Theme.SliderInt(Loc.T("Background"), ref percent, 0, 100, "%d%%"))
             config.OpenerOpacity = percent / 100f;
         if (ImGui.IsItemDeactivatedAfterEdit())
             config.Save();
@@ -104,7 +112,7 @@ public sealed class OpenerCompactWindow : Window
         // Length of the countdown started by Start (the in-game /countdown or the one in the window).
         var countdown = Math.Clamp(config.OpenerCountdown, 5, 16);
         ImGui.SetNextItemWidth(Theme.Px(140));
-        if (ImGui.SliderInt("##countdown", ref countdown, 5, 16, Loc.T("Countdown %d s")))
+        if (Theme.SliderInt("##countdown", ref countdown, 5, 16, Loc.T("Countdown %d s")))
             config.OpenerCountdown = countdown;
         if (ImGui.IsItemDeactivatedAfterEdit())
             config.Save();
@@ -113,7 +121,7 @@ public sealed class OpenerCompactWindow : Window
         {
             var seconds = config.OpenerAutoCloseSeconds;
             ImGui.SetNextItemWidth(Theme.Px(140));
-            if (ImGui.SliderInt(Loc.T("Auto close"), ref seconds, 10, 120, Loc.T("after %d s")))
+            if (Theme.SliderInt(Loc.T("Auto close"), ref seconds, 10, 120, Loc.T("after %d s")))
                 config.OpenerAutoCloseSeconds = seconds;
             if (ImGui.IsItemDeactivatedAfterEdit())
                 config.Save();

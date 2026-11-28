@@ -49,6 +49,68 @@ public static partial class GearImport
     public static bool IsLink(string text) => text.Contains("xivgear.app", StringComparison.OrdinalIgnoreCase)
                                               || text.Contains("etro.gg", StringComparison.OrdinalIgnoreCase);
 
+    // ---- Share code: a set as text to paste (no internet), "RCBIS1:" then the set's JSON, compressed, in base64.
+
+    private const string CodePrefix = "RCBIS1:";
+
+    /// <summary>Whether the text is a share code of a set.</summary>
+    public static bool IsCode(string text) => text.Trim().StartsWith(CodePrefix, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The share code of a set (without its id and relic check, which are the player's own).</summary>
+    public static string ToCode(GearSet set)
+    {
+        var copy = set.Copy(set.Name);
+        copy.Id = string.Empty;
+        foreach (var piece in copy.Pieces.Values)
+            piece.RelicChecked = null;
+        copy.Pieces = copy.Pieces.Where(p => p.Value.ItemId != 0 || p.Value.Note.Length > 0)
+                          .ToDictionary(p => p.Key, p => p.Value);
+
+        var json = System.Text.Encoding.UTF8.GetBytes(Newtonsoft.Json.JsonConvert.SerializeObject(copy, new Newtonsoft.Json.JsonSerializerSettings
+        {
+            DefaultValueHandling = Newtonsoft.Json.DefaultValueHandling.Ignore,
+        }));
+        using var output = new System.IO.MemoryStream();
+        using (var deflate = new System.IO.Compression.DeflateStream(output, System.IO.Compression.CompressionLevel.SmallestSize))
+            deflate.Write(json);
+        return CodePrefix + Convert.ToBase64String(output.ToArray());
+    }
+
+    /// <summary>The set of a share code, or an exception when the code is not one.</summary>
+    public static GearSet FromCode(string code)
+    {
+        try
+        {
+            var data = Convert.FromBase64String(code.Trim()[CodePrefix.Length..].Trim());
+            using var input = new System.IO.Compression.DeflateStream(new System.IO.MemoryStream(data), System.IO.Compression.CompressionMode.Decompress);
+            using var reader = new System.IO.StreamReader(input, System.Text.Encoding.UTF8);
+            var set = Newtonsoft.Json.JsonConvert.DeserializeObject<GearSet>(reader.ReadToEnd())
+                      ?? throw new InvalidOperationException();
+            set.Id = Guid.NewGuid().ToString("N");
+            set.Pieces ??= new();
+            foreach (var piece in set.Pieces.Values)
+            {
+                piece.Materia ??= [];
+                piece.Relic ??= new();
+                piece.Note ??= string.Empty;
+                piece.RelicChecked = null;
+            }
+
+            set.Name ??= string.Empty;
+            set.Note ??= string.Empty;
+            set.FoodNote ??= string.Empty;
+            set.Source ??= string.Empty;
+            set.Job ??= string.Empty;
+            if (GearCatalog.Jobs.All(j => j.Abbreviation != set.Job))
+                throw new InvalidOperationException();
+            return set;
+        }
+        catch (Exception e)
+        {
+            throw new InvalidOperationException(Loc.T("Not a valid set code."), e);
+        }
+    }
+
     /// <summary>The sets of a link (several for an xivgear sheet), or an exception with what went wrong.</summary>
     public static async Task<List<GearSet>> FromLink(string link)
     {

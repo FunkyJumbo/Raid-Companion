@@ -61,7 +61,7 @@ public sealed class MitigationPlanWindow : Window
     public override void PreDraw()
     {
         BgAlpha = Theme.WindowAlpha(Opacity); // the background only, not the icons
-        themeScope = Theme.Push();
+        themeScope = Theme.Push(WindowName);
         styleScope = ImRaii.PushStyle(ImGuiStyleVar.WindowRounding, Theme.Px(10))
                           .Push(ImGuiStyleVar.WindowPadding, Theme.Px(new Vector2(8, 7)));
         // The border fades with the background: no frame left around the plan once the background is gone.
@@ -192,7 +192,7 @@ public sealed class MitigationPlanWindow : Window
         }
 
         if (!mine && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            ImGui.SetTooltip(tip);
+            Theme.Tooltip(tip);
 
         ImGui.SameLine(0, Theme.Px(2));
         if (Theme.IconButton("planedit", FontAwesomeIcon.Pen, Loc.T("Edit this plan")))
@@ -218,7 +218,7 @@ public sealed class MitigationPlanWindow : Window
         var onlyMine = config.MitigationOnlyMine;
         using (ImRaii.Disabled(plugin.PlanCheck.MyColumn(plan) < 0))
         {
-            if (ImGui.Checkbox(Loc.T("My position only"), ref onlyMine))
+            if (Theme.Checkbox(Loc.T("My position only"), ref onlyMine))
             {
                 config.MitigationOnlyMine = onlyMine;
                 config.Save();
@@ -226,12 +226,12 @@ public sealed class MitigationPlanWindow : Window
         }
 
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            ImGui.SetTooltip(Loc.T("A compact plan: only your column (My column above), and the casts where it has something."));
+            Theme.Tooltip(Loc.T("A compact plan: only your column (My column above), and the casts where it has something."));
         ImGui.Separator();
 
         var percent = (int)Math.Round(config.MitigationOpacity * 100);
         ImGui.SetNextItemWidth(Theme.Px(150));
-        if (ImGui.SliderInt(Loc.T("Background"), ref percent, 0, 100, "%d%%"))
+        if (Theme.SliderInt(Loc.T("Background"), ref percent, 0, 100, "%d%%"))
             config.MitigationOpacity = percent / 100f;
         if (ImGui.IsItemDeactivatedAfterEdit())
             config.Save();
@@ -240,6 +240,7 @@ public sealed class MitigationPlanWindow : Window
         if (ImGui.MenuItem(Loc.T("Share (copy its code)")))
         {
             ImGui.SetClipboardText(MitigationPlans.Export(plan));
+            Toasts.Show(Loc.T("Copied to the clipboard"));
             message = Loc.T("Code copied.");
         }
 

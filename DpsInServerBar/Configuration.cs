@@ -450,7 +450,7 @@ public sealed class Configuration : IPluginConfiguration
         : ThemePalette.For(ThemePreset);
 
     /// <summary>Opacity of the windows' background, 0.2 to 1.</summary>
-    public float BackgroundOpacity { get; set; } = 0.96f;
+    public float BackgroundOpacity { get; set; } = 1f;
 
     /// <summary>
     /// Glass effect on the theme in use: see-through frosted windows, the game blurred behind them. On for a new
@@ -459,7 +459,25 @@ public sealed class Configuration : IPluginConfiguration
     public bool GlassEffect { get; set; } = true;
 
     /// <summary>Glass effect: strength of the blur of the game behind the windows (0: none).</summary>
-    public float GlassBlur { get; set; } = 8f;
+    public float GlassBlur { get; set; } = 12f;
+
+    /// <summary>Glass effect: a dark outline around the text, readable over a bright game behind the windows.</summary>
+    public bool TextOutline { get; set; }
+
+    /// <summary>The plugin's animations: motes and stars of the welcome window, the Live tab's bars, sparks and pull ring.</summary>
+    public bool Animations { get; set; } = true;
+
+    /// <summary>The theme's ambience behind the windows (snow, embers, fireflies...), with the animations on.</summary>
+    public bool ThemeAmbience { get; set; }
+
+    /// <summary>The ambience follows the game: rain or snow after the zone's weather.</summary>
+    public bool GameAmbience { get; set; }
+
+    /// <summary>A faint moving background behind some views (Progression, Mitigation plans, BiS sets).</summary>
+    public bool ViewBackdrops { get; set; } = true;
+
+    /// <summary>The welcome window was shown once (it opens by itself the first time).</summary>
+    public bool WelcomeShown { get; set; }
 
     // Colors (RGBA, 0-1)
     public bool UseColors { get; set; } = true;

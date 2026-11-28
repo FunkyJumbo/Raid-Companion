@@ -57,6 +57,8 @@ public sealed partial class MainWindow : Window
         Loc.Changed += () => WindowName = Loc.T("Raid Companion###DpsInServerBarMain");
         this.plugin = plugin;
         AllowBackgroundBlur = false;
+        // The tabs stay at the top: only the view under them scrolls (its own child).
+        Flags |= ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
         Size = new Vector2(760, 640);
         SizeCondition = ImGuiCond.FirstUseEver;
         shot = new WindowShot(this);
@@ -92,7 +94,7 @@ public sealed partial class MainWindow : Window
 
     public override void PreDraw()
     {
-        themeScope = Theme.Push();
+        themeScope = Theme.Push(WindowName);
 
         // Back to a view: the height it had when it was left.
         if (restoreHeight is { } restore)
@@ -134,9 +136,6 @@ public sealed partial class MainWindow : Window
     private float? shotPullListHeight;
     private float shotListDelta;
 
-    // Top of the graph that fills the rest of the window (Live, Progression), to know the height of everything above.
-    private float? graphTop;
-
     // The pull list keeps its height while the window grows: the first content height read is corrected for it.
     private void OnScreenshotStart()
     {
@@ -144,11 +143,8 @@ public sealed partial class MainWindow : Window
         shotListDelta = shotPullListHeight is null ? 0 : pullListFullHeight - pullListHeight;
     }
 
-    // Height of the whole view: everything shown, a graph filling the window at a readable height.
-    private float ContentHeight() =>
-        fitHeight ?? (graphTop is { } top
-                          ? Math.Max(windowSize.Y, top + Theme.Px(300) + ImGui.GetStyle().WindowPadding.Y)
-                          : windowSize.Y);
+    // Height of the whole view: everything shown.
+    private float ContentHeight() => fitHeight ?? windowSize.Y;
 
     // The first reading still counts the pull list at its full height: the list keeps the one it has.
     private float? ShotHeight()
@@ -169,31 +165,28 @@ public sealed partial class MainWindow : Window
         shot.Step();
         personalShown = plugin.Configuration.PersonalElements;
         Theme.BlurBehind();
+        Ambience.Draw();
+        if (selectedTab == 0)
+            Backdrop.Draw(Backdrop.Kind.CornerGlow);
+        else if (ShowProgression)
+            Backdrop.Draw(Backdrop.Kind.Corridor); // History has none
         Theme.TabStrip("main", ref selectedTab,
                        (FontAwesomeIcon.Bolt, Loc.T("Live")), (FontAwesomeIcon.History, Loc.T("History")), (FontAwesomeIcon.ChartLine, Loc.T("Progression")));
         DrawSourceAndSettings();
         Theme.Rule(2);
 
+        // The view scrolls under the tabs, which stay in place (each view keeps its own scroll). Its heights are read
+        // inside it: the window's are the same plus where it starts.
         fitHeight = null;
-        graphTop = null;
-        if (selectedTab == 0)
+        var viewTop = ImGui.GetCursorPosY();
+        using (var viewChild = ImRaii.Child($"##view{selectedTab}", Vector2.Zero, false, ImGuiWindowFlags.NoBackground))
         {
-            DrawLive();
-            fitHeight = ImGui.GetCursorPosY() - ImGui.GetStyle().ItemSpacing.Y + ImGui.GetStyle().WindowPadding.Y;
+            if (viewChild)
+                DrawView();
         }
-        else
-        {
-            // History: its sections a little further apart.
-            Theme.SectionSpacing = Theme.Px(15);
-            try
-            {
-                DrawHistory();
-            }
-            finally
-            {
-                Theme.SectionSpacing = 0;
-            }
-        }
+
+        if (fitHeight is { } viewHeight)
+            fitHeight = viewTop + viewHeight;
 
         // Another view now: remember this one's height, and give the new one its own.
         windowSize = ImGui.GetWindowSize();
@@ -205,6 +198,27 @@ public sealed partial class MainWindow : Window
             if (viewHeights.TryGetValue(view, out var height))
                 restoreHeight = height;
             lastView = view;
+        }
+    }
+
+    private void DrawView()
+    {
+        if (selectedTab == 0)
+        {
+            DrawLive();
+            fitHeight = ImGui.GetCursorPosY() - ImGui.GetStyle().ItemSpacing.Y + ImGui.GetStyle().WindowPadding.Y;
+            return;
+        }
+
+        // History: its sections a little further apart.
+        Theme.SectionSpacing = Theme.Px(15);
+        try
+        {
+            DrawHistory();
+        }
+        finally
+        {
+            Theme.SectionSpacing = 0;
         }
     }
 

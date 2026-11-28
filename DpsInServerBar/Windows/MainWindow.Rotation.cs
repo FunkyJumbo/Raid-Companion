@@ -23,8 +23,23 @@ public sealed partial class MainWindow
 
     // The lanes of a pull's rotation, rebuilt for another pull or another language.
     private static (Guid Pull, string Language) rotationKey;
-    private static List<(double At, uint Icon, string Text)> rotationGcds = [];
-    private static List<(double At, uint Icon, string Text)> rotationOgcds = [];
+    private static List<(double At, uint Icon, string Text, RotationUse Use)> rotationGcds = [];
+    private static List<(double At, uint Icon, string Text, RotationUse Use)> rotationOgcds = [];
+
+    // What an action landed on, for its tooltip (empty when not recorded).
+    private static string TargetText(RotationUse use)
+    {
+        var name = use.TargetKind switch
+        {
+            TargetKind.Self => Loc.T("you"),
+            TargetKind.Player => Names.Show(use.Target),
+            TargetKind.Other => use.Target,
+            _ => string.Empty,
+        };
+        if (name.Length == 0)
+            return use.Targets > 1 ? Loc.F("On {0} targets", use.Targets) : string.Empty;
+        return use.Targets > 1 ? Loc.F("On {0} and {1} more", name, use.Targets - 1) : Loc.F("On {0}", name);
+    }
 
     private static void FoldRotation(PullRecord pull)
     {
@@ -56,11 +71,11 @@ public sealed partial class MainWindow
                 if (use.Item)
                 {
                     var (icon, name) = ActionIcons.OfItem(use.ActionId);
-                    rotationOgcds.Add((use.AtSeconds, icon, name));
+                    rotationOgcds.Add((use.AtSeconds, icon, name, use));
                     continue;
                 }
 
-                var mark = (use.AtSeconds, ActionIcons.OfAction(use.ActionId), GameNames.Action(use.ActionId, $"#{use.ActionId}"));
+                var mark = (use.AtSeconds, ActionIcons.OfAction(use.ActionId), GameNames.Action(use.ActionId, $"#{use.ActionId}"), use);
                 (CustomOpeners.IsGcd(use.ActionId) ? rotationGcds : rotationOgcds).Add(mark);
             }
         }
@@ -72,7 +87,7 @@ public sealed partial class MainWindow
         if (Theme.IconButton("rotzoomin", FontAwesomeIcon.SearchPlus, Loc.T("Zoom in")))
             rotationZoom = Math.Min(MaxRotationZoom, rotationZoom * 1.25f);
         ImGui.SameLine();
-        Theme.Hint(Loc.T("Wheel: move along the pull. Ctrl + wheel: zoom. Hover an icon for its action and time."));
+        Theme.Hint(Loc.T("Wheel: move along the pull. Ctrl + wheel: zoom. Hover an icon for its action, time and target."));
 
         var iconSize = Theme.Px(24);
         var laneHeight = iconSize + Theme.Px(3);
@@ -84,8 +99,8 @@ public sealed partial class MainWindow
 
         // Lane names on the left, outside the part that scrolls.
         var labelWidth = Theme.Px(44);
-        var gcdRows = PackIcons(rotationGcds, t => (float)(t - start) * pps + pad, iconSize);
-        var ogcdRows = PackIcons(rotationOgcds, t => (float)(t - start) * pps + pad, iconSize);
+        var gcdRows = PackIcons(rotationGcds.Select(m => (m.At, m.Icon, m.Text)).ToList(), t => (float)(t - start) * pps + pad, iconSize);
+        var ogcdRows = PackIcons(rotationOgcds.Select(m => (m.At, m.Icon, m.Text)).ToList(), t => (float)(t - start) * pps + pad, iconSize);
         var gcdHeight = Math.Max(1, gcdRows.Select(r => r.Row + 1).DefaultIfEmpty(1).Max()) * laneHeight;
         var ogcdHeight = Math.Max(1, ogcdRows.Select(r => r.Row + 1).DefaultIfEmpty(1).Max()) * laneHeight;
         var ticksHeight = ImGui.GetTextLineHeight() + Theme.Px(2);
@@ -99,6 +114,7 @@ public sealed partial class MainWindow
         ImGui.Dummy(new Vector2(labelWidth, height + scrollbar));
         ImGui.SameLine(0, 0);
 
+        Ambience.OccludeNext(new Vector2(-1, height + scrollbar));
         using var child = ImRaii.Child("##rotation", new Vector2(-1, height + scrollbar), false, ImGuiWindowFlags.HorizontalScrollbar);
         if (!child)
             return;
@@ -156,11 +172,11 @@ public sealed partial class MainWindow
                     Theme.U32(Theme.Line, 0.35f), 1f);
 
         string? tooltip = null;
-        void DrawLane(List<(double At, uint Icon, string Text)> marks, List<(int Row, float Left)> rows, float laneTop)
+        void DrawLane(List<(double At, uint Icon, string Text, RotationUse Use)> marks, List<(int Row, float Left)> rows, float laneTop)
         {
             for (var k = 0; k < marks.Count; k++)
             {
-                var (at, icon, text) = marks[k];
+                var (at, icon, text, use) = marks[k];
                 var pos = new Vector2(origin.X + rows[k].Left, laneTop + rows[k].Row * laneHeight + Theme.Px(2));
                 if (icon != 0)
                     ActionIcons.DrawAt(cdl, icon, pos, iconSize);
@@ -169,7 +185,8 @@ public sealed partial class MainWindow
                 if (hovered && mouse.X >= pos.X && mouse.X <= pos.X + iconSize && mouse.Y >= pos.Y && mouse.Y <= pos.Y + iconSize)
                 {
                     var time = at < 0 ? $"-{NumberFormat.Duration(TimeSpan.FromSeconds(-at))}" : NumberFormat.Duration(TimeSpan.FromSeconds(at));
-                    tooltip = $"{time}  {text}";
+                    var on = TargetText(use);
+                    tooltip = on.Length > 0 ? $"{time}  {text}" + "\n" + on : $"{time}  {text}";
                 }
             }
         }
@@ -178,6 +195,6 @@ public sealed partial class MainWindow
         DrawLane(rotationOgcds, ogcdRows, top + gcdHeight + Theme.Px(2));
 
         if (tooltip is not null)
-            ImGui.SetTooltip(tooltip);
+            Theme.Tooltip(tooltip);
     }
 }

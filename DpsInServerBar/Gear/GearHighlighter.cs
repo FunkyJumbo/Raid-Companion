@@ -42,7 +42,6 @@ public sealed unsafe class GearHighlighter : IDisposable
     // Slots: a tint added to the node's colors. Names: the text's color.
     private static readonly (short R, short G, short B) SlotTint = (-30, 90, -10);
     private static readonly (short R, short G, short B) LackTint = (90, 55, -40);
-    private static readonly ByteColor HaveText = new() { R = 120, G = 230, B = 130, A = 255 };
     private static readonly ByteColor LackText = new() { R = 255, G = 200, B = 70, A = 255 };
 
     private readonly IGameGui gameGui;
@@ -84,6 +83,8 @@ public sealed unsafe class GearHighlighter : IDisposable
                     if (addon != null)
                         Walk(window, &addon->UldManager, grid: true);
                 }
+
+                LightMelding();
 
                 foreach (var (window, countIndex) in ExchangeShops)
                 {
@@ -163,6 +164,22 @@ public sealed unsafe class GearHighlighter : IDisposable
             var name = GearCatalog.GameName(id);
             if (name.Length > 0)
                 names.Add((name, have));
+        }
+
+        // The pieces you own with materia still to meld (by their name in the game), and those materia's names.
+        toMeld.Clear();
+        foreach (var set in sets())
+        {
+            var copies = GearInventory.Match(set);
+            foreach (var (slot, piece) in set.Pieces.Where(p => p.Value.ItemId != 0))
+            {
+                if (copies.GetValueOrDefault(slot) is not { } copy)
+                    continue;
+                var melded = GearInventory.Melded(piece, copy);
+                var missing = piece.Materia.Where((m, i) => m != 0 && !melded[i]).Select(GearCatalog.GameName).Where(n => n.Length > 0).ToHashSet();
+                if (missing.Count > 0)
+                    toMeld[GearCatalog.GameName(piece.ItemId)] = missing;
+            }
         }
 
         ownedIcons.Clear();
@@ -363,6 +380,66 @@ public sealed unsafe class GearHighlighter : IDisposable
             var item = container->GetInventorySlot(entry->Slot);
             if (item != null && item->ItemId != 0 && targets.ContainsKey(item->ItemId % 1_000_000))
                 TintSlot(window, node);
+        }
+    }
+
+    // ---- Materia melding: the pieces of the set with materia to meld (left), and for the piece selected the materia it
+    // still needs (right). Read from the window's values (the names of both lists and the piece selected), as BisBuddy.
+
+    private readonly Dictionary<string, HashSet<string>> toMeld = new(StringComparer.OrdinalIgnoreCase);
+    private const uint MeldGearList = 13, MeldMateriaList = 23;
+    private const int MeldSelected = 287, MeldGearNames = 147, MeldMateriaNames = 429;
+
+    private void LightMelding()
+    {
+        var addon = Visible("MateriaAttach");
+        if (addon == null || toMeld.Count == 0 || addon->AtkValuesCount <= MeldMateriaNames)
+            return;
+
+        var gear = Names(addon, MeldGearNames);
+        var selected = addon->AtkValues[MeldSelected].Type == AtkValueType.Int ? addon->AtkValues[MeldSelected].Int : -1;
+        var needed = selected >= 0 && selected < gear.Count && toMeld.TryGetValue(gear[selected], out var materia) ? materia : null;
+
+        LightList("MateriaAttach", addon, MeldGearList, gear, name => toMeld.ContainsKey(name));
+        if (needed is not null)
+            LightList("MateriaAttach", addon, MeldMateriaList, Names(addon, MeldMateriaNames), needed.Contains);
+    }
+
+    // The names of a list held in a window's values, from an index on (until the first value that is not text).
+    private static List<string> Names(AtkUnitBase* addon, int first)
+    {
+        var names = new List<string>();
+        for (var i = first; i < addon->AtkValuesCount; i++)
+        {
+            var value = addon->AtkValues[i];
+            if (value.Type != AtkValueType.String && value.Type != AtkValueType.ManagedString)
+                break;
+            var text = Dalamud.Game.Text.SeStringHandling.SeString.Parse(value.String.Value).TextValue;
+            names.Add(text.Trim().TrimEnd('').Trim()); // without the high quality mark
+        }
+
+        return names;
+    }
+
+    // Lights the rows of a list (by their index in the names) whose name is wanted.
+    private void LightList(string window, AtkUnitBase* addon, uint listNode, List<string> names, Func<string, bool> wanted)
+    {
+        var node = addon->GetNodeById(listNode);
+        if (node == null || (int)node->Type < 1000)
+            return;
+        var list = (AtkComponentList*)((AtkComponentNode*)node)->Component;
+        if (list == null)
+            return;
+
+        for (var i = 0; i < list->ListLength; i++)
+        {
+            var renderer = list->ItemRendererList[i].AtkComponentListItemRenderer;
+            if (renderer == null || renderer->OwnerNode == null)
+                continue;
+            var row = (AtkResNode*)renderer->OwnerNode;
+            var index = renderer->ListItemIndex;
+            if (row->IsVisible() && index >= 0 && index < names.Count && wanted(names[index]))
+                TintSlot(window, row);
         }
     }
 

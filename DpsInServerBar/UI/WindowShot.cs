@@ -69,7 +69,7 @@ public sealed class WindowShot
             if (button == ImGuiMouseButton.Left)
                 Request(view(), contentHeight, onStart);
         },
-        ShowTooltip = () => ImGui.SetTooltip(Loc.T("Screenshot: saves a picture of this window in Pictures\\Raid Companion.")),
+        ShowTooltip = () => Theme.Tooltip(Loc.T("Screenshot: saves a picture of this window in Pictures\\Raid Companion.")),
         Priority = -1,
     };
 

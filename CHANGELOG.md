@@ -3,6 +3,17 @@
 <!-- One "## <version>" section per release. The Release workflow publishes the section of the tagged
      version as the GitHub release notes; the same notes go into pluginmaster.json (shown in Dalamud). -->
 
+## 1.0.11.0
+
+- A welcome window presenting the plugin, and animations across the windows (they can be turned off in Settings > Appearance).
+- Faint backgrounds behind some views, the theme's ambience, and rain or snow after the game's weather (Settings > Appearance).
+- Glass effect: an optional dark outline around the grey text.
+- History, Personal, Rotation: hover an action to see its target (new pulls).
+- History, Progression: clicking a kind of content shows it alone; All shows them all again.
+- BiS gearsets: share a set as a code, rename a set, and the materia melding window lights what is left to meld.
+- A dead player's bar goes grey until they are raised.
+- Various UI changes and adjustments.
+
 ## 1.0.10.0
 
 - BiS gearsets (Live): your best in slot sets per job, made in an editor (items up to an item level, materia, food, relic stats, notes) or imported from xivgear.app and etro.gg.

@@ -21,6 +21,11 @@ public sealed class DpsGraph
     /// <summary>Height of the DPS and uptime graphs: always the same, so they stay readable.</summary>
     public static float Height => Theme.Px(250);
 
+    // The legend's line above each plot (outside it, so it hides no point): added to the plot's height.
+    private static float LegendRoom => ImGui.GetTextLineHeightWithSpacing() + Theme.Px(4);
+
+    private static void SetupLegendAbove() => ImPlot.SetupLegend(ImPlotLocation.North, ImPlotLegendFlags.Outside | ImPlotLegendFlags.Horizontal);
+
     // Graphs zoomed into (mouse wheel, drag) and graphs under the mouse last frame, by plot id.
     private static readonly HashSet<string> Zoomed = [];
     private static readonly HashSet<string> Hovered = [];
@@ -54,12 +59,12 @@ public sealed class DpsGraph
 
         ImGui.SameLine();
         var rolling = ShowRolling;
-        if (ImGui.Checkbox(Loc.F("Rolling ({0}s)",window), ref rolling))
+        if (Theme.Checkbox(Loc.F("Rolling ({0}s)",window), ref rolling))
             ShowRolling = rolling;
 
         ImGui.SameLine();
         var average = ShowAverage;
-        if (ImGui.Checkbox(Loc.T("Encounter average"), ref average))
+        if (Theme.Checkbox(Loc.T("Encounter average"), ref average))
             ShowAverage = average;
 
         ZoomHelp();
@@ -126,11 +131,13 @@ public sealed class DpsGraph
         }
 
         using var style = PushStyle();
-        if (!ImPlot.BeginPlot(id, new Vector2(-1, height), ImPlotFlags.NoMenus | ImPlotFlags.NoBoxSelect))
+        Ambience.OccludeNext(new Vector2(-1, height + LegendRoom));
+        if (!ImPlot.BeginPlot(id, new Vector2(-1, height + LegendRoom), ImPlotFlags.NoMenus | ImPlotFlags.NoBoxSelect))
             return;
 
         // No vertical axis title: ImPlot draws it with glyphs the game font does not have. The ticks say "%".
         ImPlot.SetupAxes(Loc.T("Time (s)"), string.Empty, ImPlotAxisFlags.None, ImPlotAxisFlags.NoLabel);
+        SetupLegendAbove();
         SetupTimeAxis(id, pulls.Max(p => p.Available.Length) - 1);
         // A little below 0, so that a curve at 0 is not hidden by the frame.
         ImPlot.SetupAxisLimits(ImAxis.Y1, -4, 105, ImPlotCond.Always);
@@ -199,7 +206,7 @@ public sealed class DpsGraph
                           .OrderByDescending(g => g.Seconds)
                           .FirstOrDefault();
         if (hovered is not null)
-            ImGui.SetTooltip($"{NumberFormat.Duration(TimeSpan.FromSeconds(hovered.AtSeconds))}  {GapLabel(hovered.Kind)} {hovered.Seconds:0.0}s");
+            Theme.Tooltip($"{NumberFormat.Duration(TimeSpan.FromSeconds(hovered.AtSeconds))}  {GapLabel(hovered.Kind)} {hovered.Seconds:0.0}s");
     }
 
     /// <summary>A vertical red line at each death (one legend entry, so they can be hidden), named in a tooltip on hover.</summary>
@@ -218,7 +225,7 @@ public sealed class DpsGraph
         var mouse = ImPlot.GetPlotMousePos();
         var near = deaths.Where(d => Math.Abs(d.AtSeconds - mouse.X) <= 1.5).ToList();
         if (near.Count > 0)
-            ImGui.SetTooltip(string.Join("\n", near.Select(d => Loc.F("{0}  {1} died: {2}",NumberFormat.Duration(TimeSpan.FromSeconds(d.AtSeconds)),Names.Show(d.Player),d.CauseText))));
+            Theme.Tooltip(string.Join("\n", near.Select(d => Loc.F("{0}  {1} died: {2}",NumberFormat.Duration(TimeSpan.FromSeconds(d.AtSeconds)),Names.Show(d.Player),d.CauseText))));
     }
 
     /// <summary>
@@ -260,18 +267,20 @@ public sealed class DpsGraph
 
     public static int? DrawProgression(
         string id, IReadOnlyList<double> xs, string xLabel, IReadOnlyList<double?> scores, IReadOnlyList<bool> kills,
-        double max, IReadOnlyList<string>? phases, float height, Func<int, string> describe)
+        double max, IReadOnlyList<string>? phases, float height, Func<int, string> describe, float reveal = 1f, PulseStar? mark = null)
     {
         if (scores.Count == 0)
             return null;
 
         using var style = PushStyle();
-        if (!ImPlot.BeginPlot(id, new Vector2(-1, Math.Max(height, MinHeight)), ImPlotFlags.NoMenus | ImPlotFlags.NoBoxSelect | ImPlotFlags.NoMouseText))
+        Ambience.OccludeNext(new Vector2(-1, Math.Max(height, MinHeight) + LegendRoom));
+        if (!ImPlot.BeginPlot(id, new Vector2(-1, Math.Max(height, MinHeight) + LegendRoom), ImPlotFlags.NoMenus | ImPlotFlags.NoBoxSelect | ImPlotFlags.NoMouseText))
             return null;
 
         var ultimate = phases is { Count: > 0 };
         ImPlot.SetupAxes(xLabel, ultimate ? Loc.T("Phase (boss HP taken)") : Loc.T("Boss HP taken %"), ImPlotAxisFlags.None,
                          ImPlotAxisFlags.NoLabel | (ultimate ? ImPlotAxisFlags.NoTickLabels : ImPlotAxisFlags.None));
+        SetupLegendAbove();
         var xMin = 0.0; // the graph starts from nothing done, at 0
         var xMax = Math.Max(xs.Max(), xMin + 1);
         var margin = (xMax - xMin) * 0.02 + (xLabel == Loc.T("Pull") ? 0.3 : 0);
@@ -305,8 +314,10 @@ public sealed class DpsGraph
             ImPlot.PopStyleColor();
         }
 
-        var x = xs.Select(v => (float)v).ToArray();
-        var ys = scores.Select(s => s is { } v ? (float)v : float.NaN).ToArray();
+        // Drawn as far as revealed: the curve traces itself when the view opens.
+        var shown = Math.Clamp((int)MathF.Ceiling(scores.Count * Fx.Clamp01(reveal)), 1, scores.Count);
+        var x = xs.Take(shown).Select(v => (float)v).ToArray();
+        var ys = scores.Take(shown).Select(s => s is { } v ? (float)v : float.NaN).ToArray();
         var bestSoFar = new float[ys.Length];
         var best = float.NaN;
         for (var i = 0; i < ys.Length; i++)
@@ -341,6 +352,15 @@ public sealed class DpsGraph
             ImPlot.PlotScatter(Loc.T("Kill"), ref killXs[0], ref killYs[0], killXs.Length, ImPlotScatterFlags.None, 0, sizeof(float));
         }
 
+        // The tracing's head, and the star above the furthest pull once traced.
+        var plotDl = ImPlot.GetPlotDrawList();
+        ImPlot.PushPlotClipRect();
+        if (reveal < 1 && Array.FindLastIndex(ys, y => !float.IsNaN(y)) is var head and >= 0)
+            Fx.Glow(plotDl, ImPlot.PlotToPixels(x[head], ys[head]), Theme.Px(3), Theme.GoldBright, 1f);
+        if (mark is not null && reveal >= 1 && !float.IsNaN(best) && Array.FindIndex(ys, y => !float.IsNaN(y) && y >= best) is var furthest and >= 0)
+            mark.Draw(plotDl, ImPlot.PlotToPixels(x[furthest], ys[furthest]), Theme.Px(22), Theme.GoldBright, (furthest, best));
+        ImPlot.PopPlotClipRect();
+
         int? clicked = null;
         if (ImPlot.IsPlotHovered())
         {
@@ -350,7 +370,7 @@ public sealed class DpsGraph
             var perPixel = (xMax - xMin + margin) / Math.Max(ImPlot.GetPlotSize().X, 1);
             if (Math.Abs(x[index] - mouse) <= Math.Max(perPixel * 12, xLabel == Loc.T("Pull") ? 0.5 : 0))
             {
-                ImGui.SetTooltip(describe(index));
+                Theme.Tooltip(describe(index));
                 if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
                     clicked = index;
             }
@@ -358,6 +378,35 @@ public sealed class DpsGraph
 
         ImPlot.EndPlot();
         return clicked;
+    }
+
+    // Each phase's start: a gold line with the phase's name, dropping from above when it is new, a glint as it lands.
+    private static void DrawPhaseMarks(IReadOnlyList<PhaseMark>? marks)
+    {
+        if (marks is not { Count: > 0 })
+            return;
+        var dl = ImPlot.GetPlotDrawList();
+        var pos = ImPlot.GetPlotPos();
+        var size = ImPlot.GetPlotSize();
+        ImPlot.PushPlotClipRect();
+        foreach (var mark in marks)
+        {
+            var x = ImPlot.PlotToPixels(mark.Seconds, 0).X;
+            if (x < pos.X || x > pos.X + size.X)
+                continue;
+            var age = Fx.Enabled ? Fx.Now - mark.At : 10f;
+            var k = Fx.EaseOut(age / 0.45f);
+            var top = pos.Y + Theme.Px(2) - (1 - k) * Theme.Px(40);
+            var alpha = 0.3f + 0.7f * k;
+            dl.AddLine(new Vector2(x, top), new Vector2(x, pos.Y + size.Y), Theme.U32(Theme.Gold, 0.55f * alpha), Theme.Px(1.5f));
+            dl.AddTriangleFilled(new Vector2(x - Theme.Px(5), top), new Vector2(x + Theme.Px(5), top), new Vector2(x, top + Theme.Px(7)),
+                                 Theme.U32(Theme.GoldBright, alpha));
+            dl.AddText(new Vector2(x + Theme.Px(6), top + Theme.Px(1)), Theme.U32(Theme.GoldBright, alpha), mark.Label);
+            if (age is > 0.35f and < 1f)
+                Fx.Glow(dl, new Vector2(x, top + Theme.Px(3)), Theme.Px(4), Theme.GoldBright, 1 - (age - 0.35f) / 0.65f);
+        }
+
+        ImPlot.PopPlotClipRect();
     }
 
     public static string GapLabel(GcdGapKind kind) => kind switch
@@ -382,8 +431,12 @@ public sealed class DpsGraph
         public void Dispose() => ImPlot.PopStyleColor(count);
     }
 
+    /// <summary>A phase of an ultimate starting at this second of the pull, marked on the graph (dropping in when new).</summary>
+    public sealed record PhaseMark(double Seconds, string Label, float At);
+
     public static void Draw(
-        string id, IReadOnlyList<Series> series, float height, double? threshold = null, IReadOnlyList<PartyDeath>? deaths = null)
+        string id, IReadOnlyList<Series> series, float height, double? threshold = null, IReadOnlyList<PartyDeath>? deaths = null,
+        IReadOnlyList<PhaseMark>? phases = null)
     {
         var longest = series.Select(s => s.Values.Length).DefaultIfEmpty(0).Max();
         using var style = PushStyle();
@@ -391,15 +444,18 @@ public sealed class DpsGraph
         ImPlot.PushStyleVar(ImPlotStyleVar.FitPadding, new Vector2(0, 0.06f));
         try
         {
-            if (!ImPlot.BeginPlot(id, new Vector2(-1, height), ImPlotFlags.NoMenus | ImPlotFlags.NoBoxSelect))
+            Ambience.OccludeNext(new Vector2(-1, height + LegendRoom));
+            if (!ImPlot.BeginPlot(id, new Vector2(-1, height + LegendRoom), ImPlotFlags.NoMenus | ImPlotFlags.NoBoxSelect))
                 return;
 
             // No vertical axis title: ImPlot draws it with glyphs the game font does not have. The vertical axis fits
             // the part of the fight shown, so it follows a zoom.
             ImPlot.SetupAxes(Loc.T("Time (s)"), string.Empty, ImPlotAxisFlags.None,
                              ImPlotAxisFlags.NoLabel | ImPlotAxisFlags.AutoFit | ImPlotAxisFlags.RangeFit);
+            SetupLegendAbove();
             SetupTimeAxis(id, longest - 1);
             DrawSeries(series, longest, threshold, deaths);
+            DrawPhaseMarks(phases);
             TrackHover(id);
             ImPlot.EndPlot();
         }

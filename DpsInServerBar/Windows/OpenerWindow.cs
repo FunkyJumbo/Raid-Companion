@@ -73,7 +73,8 @@ public sealed class OpenerWindow : Window
 
     public override void PreDraw()
     {
-        themeScope = Theme.Push();
+        themeScope = Theme.Push(WindowName);
+        fadeScope = SuccessAlpha < 1 ? ImRaii.PushStyle(ImGuiStyleVar.Alpha, ImGui.GetStyle().Alpha * SuccessAlpha) : null;
         BgAlpha = Theme.WindowAlpha(plugin.Configuration.OpenerOpacity); // the background only, not the icons and text
 
         // Stretch it sideways to fit a long opener on fewer rows (at most the whole opener on one row); its height
@@ -105,9 +106,13 @@ public sealed class OpenerWindow : Window
 
     public override void PostDraw()
     {
+        fadeScope?.Dispose();
+        fadeScope = null;
         themeScope?.Dispose();
         themeScope = null;
     }
+
+    private IDisposable? fadeScope;
 
     private void OnActionUsed(byte type, uint id) => run?.OnAction(type, id);
 
@@ -115,7 +120,10 @@ public sealed class OpenerWindow : Window
     {
         shot.Step();
         Theme.BlurBehind(plugin.Configuration.OpenerOpacity > 0.05f);
+        if (plugin.Configuration.OpenerOpacity > 0.05f)
+            Backdrop.Draw(Backdrop.Kind.Hive); // not on a window made see-through
         DrawContent();
+        DrawSuccess();
         windowWidth = ImGui.GetWindowWidth();
         contentHeight = ImGui.GetCursorPosY() - ImGui.GetStyle().ItemSpacing.Y + ImGui.GetStyle().WindowPadding.Y;
     }
@@ -191,7 +199,7 @@ public sealed class OpenerWindow : Window
         if (Theme.Chip($"{Math.Round(config.OpenerCompactScale * 100)}%", false, transparent))
             ImGui.OpenPopup("##openercompactsize");
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Size of this window"));
+            Theme.Tooltip(Loc.T("Size of this window"));
 
         // The same options as in the full window: changing one starts a new try.
         ImGui.SameLine();
@@ -202,7 +210,7 @@ public sealed class OpenerWindow : Window
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Include the actions used before the pull. Off: the run starts with the first action after the pull."));
+            Theme.Tooltip(Loc.T("Include the actions used before the pull. Off: the run starts with the first action after the pull."));
 
         ImGui.SameLine();
         if (Theme.Chip(Loc.T("Tincture"), config.OpenerPotion, transparent))
@@ -212,7 +220,7 @@ public sealed class OpenerWindow : Window
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Include the tincture. Off: using an item is ignored."));
+            Theme.Tooltip(Loc.T("Include the tincture. Off: using an item is ignored."));
 
         ImGui.SameLine();
         // Countdown: a small pop-up with its length, and whether Start uses the in-game /countdown (gold when it does).
@@ -220,7 +228,7 @@ public sealed class OpenerWindow : Window
             ImGui.OpenPopup("##openercompactcountdown");
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Start launches the in-game /countdown (seen by your party), for a real pull on a striking dummy.\nIn combat the game refuses it: the countdown then runs in this window only.\nA /countdown started by you or anyone in the party also starts a run."));
+            Theme.Tooltip(Loc.T("Start launches the in-game /countdown (seen by your party), for a real pull on a striking dummy.\nIn combat the game refuses it: the countdown then runs in this window only.\nA /countdown started by you or anyone in the party also starts a run."));
 
         using (var countdownPopup = ImRaii.Popup("##openercompactcountdown"))
         {
@@ -229,13 +237,13 @@ public sealed class OpenerWindow : Window
                 ImGui.SetWindowFontScale(1f);
                 var countdown = Math.Clamp(config.OpenerCountdown, 5, 16);
                 ImGui.SetNextItemWidth(Theme.Px(160));
-                if (ImGui.SliderInt("##openercountdown", ref countdown, 5, 16, Loc.T("Countdown %d s")))
+                if (Theme.SliderInt("##openercountdown", ref countdown, 5, 16, Loc.T("Countdown %d s")))
                     config.OpenerCountdown = countdown;
                 if (ImGui.IsItemDeactivatedAfterEdit())
                     config.Save();
 
                 var useGame = config.OpenerGameCountdown;
-                if (ImGui.Checkbox(Loc.T("Use /countdown"), ref useGame))
+                if (Theme.Checkbox(Loc.T("Use /countdown"), ref useGame))
                 {
                     config.OpenerGameCountdown = useGame;
                     config.Save();
@@ -251,7 +259,7 @@ public sealed class OpenerWindow : Window
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.F("Closes the window by itself once the opener is done, or {0} s after its first action.",config.OpenerAutoCloseSeconds)
+            Theme.Tooltip(Loc.F("Closes the window by itself once the opener is done, or {0} s after its first action.",config.OpenerAutoCloseSeconds)
                              + Loc.T("\nRight click the window to change the delay."));
 
         // Background opacity: a small pop-up with a slider.
@@ -266,7 +274,7 @@ public sealed class OpenerWindow : Window
                 ImGui.SetWindowFontScale(1f);
                 var percent = (int)Math.Round(config.OpenerOpacity * 100);
                 ImGui.SetNextItemWidth(Theme.Px(160));
-                if (ImGui.SliderInt("##openerbg", ref percent, 0, 100, "%d%%"))
+                if (Theme.SliderInt("##openerbg", ref percent, 0, 100, "%d%%"))
                     config.OpenerOpacity = percent / 100f;
                 if (ImGui.IsItemDeactivatedAfterEdit())
                     config.Save();
@@ -331,7 +339,7 @@ public sealed class OpenerWindow : Window
         if (Theme.Chip($"{Math.Round(config.OpenerScale * 100)}%##openersize", false))
             ImGui.OpenPopup("##openersize");
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Size of the opener's actions"));
+            Theme.Tooltip(Loc.T("Size of the opener's actions"));
 
         using var popup = ImRaii.Popup("##openersize");
         if (!popup)
@@ -370,7 +378,7 @@ public sealed class OpenerWindow : Window
         DrawSizeChip(config);
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(opener.Source);
+            Theme.Tooltip(opener.Source);
 
         ImGui.SameLine();
         if (Theme.IconButton("openereditor", FontAwesomeIcon.PencilAlt, Loc.T("Opener editor: make your own openers, change a copy of this one, share them with a code")))
@@ -387,7 +395,7 @@ public sealed class OpenerWindow : Window
                 ? Loc.F("Starts the in-game /countdown {0}.",config.OpenerCountdown)
                 : Loc.F("Starts a {0} s countdown in this window",config.OpenerCountdown)
                   + (config.OpenerGameCountdown ? Loc.T(" (in combat or during a countdown, the game refuses /countdown).") : ".");
-            ImGui.SetTooltip(how + Loc.T("\nYou can also just use the first action: the run starts with it."));
+            Theme.Tooltip(how + Loc.T("\nYou can also just use the first action: the run starts with it."));
         }
 
         ImGui.SameLine();
@@ -397,7 +405,7 @@ public sealed class OpenerWindow : Window
         ImGui.SameLine();
         var countdown = config.OpenerCountdown;
         ImGui.SetNextItemWidth(Theme.Px(130));
-        if (ImGui.SliderInt("##countdown", ref countdown, 5, 16, Loc.T("Countdown %d s")))
+        if (Theme.SliderInt("##countdown", ref countdown, 5, 16, Loc.T("Countdown %d s")))
             config.OpenerCountdown = countdown;
         if (ImGui.IsItemDeactivatedAfterEdit())
             config.Save();
@@ -413,43 +421,43 @@ public sealed class OpenerWindow : Window
 
         var opacity = (int)Math.Round(config.OpenerOpacity * 100);
         ImGui.SetNextItemWidth(sliderWidth);
-        if (ImGui.SliderInt("##openeropacity", ref opacity, 0, 100, Loc.T("Background %d%%")))
+        if (Theme.SliderInt("##openeropacity", ref opacity, 0, 100, Loc.T("Background %d%%")))
             config.OpenerOpacity = opacity / 100f;
         if (ImGui.IsItemDeactivatedAfterEdit())
             config.Save();
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Opacity of the window's background only: icons and text stay fully visible."));
+            Theme.Tooltip(Loc.T("Opacity of the window's background only: icons and text stay fully visible."));
 
         ImGui.SameLine();
         if (Theme.PrimaryButton(Loc.T("Compact")))
             plugin.SetOpenerCompact(true);
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Only the opener's icons, Start / Reset and a way back, in a small pop-up window."));
+            Theme.Tooltip(Loc.T("Only the opener's icons, Start / Reset and a way back, in a small pop-up window."));
 
         var prepull = config.OpenerPrepull;
-        if (ImGui.Checkbox(Loc.T("Pre-pull"), ref prepull))
+        if (Theme.Checkbox(Loc.T("Pre-pull"), ref prepull))
         {
             config.OpenerPrepull = prepull;
             config.Save();
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Include the actions used before the pull. Off: the run starts with the first action after the pull."));
+            Theme.Tooltip(Loc.T("Include the actions used before the pull. Off: the run starts with the first action after the pull."));
 
         ImGui.SameLine(0, Theme.Px(14));
         var potion = config.OpenerPotion;
-        if (ImGui.Checkbox(Loc.T("Tincture"), ref potion))
+        if (Theme.Checkbox(Loc.T("Tincture"), ref potion))
         {
             config.OpenerPotion = potion;
             config.Save();
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Include the tincture. Off: using an item is ignored."));
+            Theme.Tooltip(Loc.T("Include the tincture. Off: using an item is ignored."));
 
         ImGui.SameLine(0, Theme.Px(14));
         var useGame = config.OpenerGameCountdown;
-        if (ImGui.Checkbox(Loc.T("Use /countdown"), ref useGame))
+        if (Theme.Checkbox(Loc.T("Use /countdown"), ref useGame))
         {
             config.OpenerGameCountdown = useGame;
             config.Save();
@@ -457,26 +465,26 @@ public sealed class OpenerWindow : Window
 
         if (ImGui.IsItemHovered())
         {
-            ImGui.SetTooltip(Loc.T("Start launches the in-game /countdown (seen by your party), for a real pull on a striking dummy.\nIn combat the game refuses it: the countdown then runs in this window only.\nA /countdown started by you or anyone in the party also starts a run."));
+            Theme.Tooltip(Loc.T("Start launches the in-game /countdown (seen by your party), for a real pull on a striking dummy.\nIn combat the game refuses it: the countdown then runs in this window only.\nA /countdown started by you or anyone in the party also starts a run."));
         }
 
         ImGui.SameLine(0, Theme.Px(14));
         var autoClose = config.OpenerAutoClose;
-        if (ImGui.Checkbox(Loc.T("Auto close"), ref autoClose))
+        if (Theme.Checkbox(Loc.T("Auto close"), ref autoClose))
         {
             config.OpenerAutoClose = autoClose;
             config.Save();
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.F("Closes the window by itself once the opener is done, or {0} s after its first action.",config.OpenerAutoCloseSeconds));
+            Theme.Tooltip(Loc.F("Closes the window by itself once the opener is done, or {0} s after its first action.",config.OpenerAutoCloseSeconds));
 
         using (ImRaii.Disabled(!config.OpenerAutoClose))
         {
             ImGui.SameLine();
             var seconds = config.OpenerAutoCloseSeconds;
             ImGui.SetNextItemWidth(Theme.Px(120));
-            if (ImGui.SliderInt("##autoclose", ref seconds, 10, 120, Loc.T("after %d s")))
+            if (Theme.SliderInt("##autoclose", ref seconds, 10, 120, Loc.T("after %d s")))
                 config.OpenerAutoCloseSeconds = seconds;
             if (ImGui.IsItemDeactivatedAfterEdit())
                 config.Save();
@@ -494,10 +502,35 @@ public sealed class OpenerWindow : Window
             return;
 
         var now = DateTime.UtcNow;
-        var done = run.FinishedUtc is { } finished && (now - finished).TotalSeconds >= 3;
+        // A success plays its light, flash and fade first.
+        var done = run.FinishedUtc is { } finished
+                   && (now - finished).TotalSeconds >= (SuccessAge is not null ? EdgeBeam.Run + EdgeBeam.Flash + FadeOut : 3);
         var timedOut = run.FirstActionUtc is { } first && (now - first).TotalSeconds >= config.OpenerAutoCloseSeconds;
         if (done || timedOut)
             plugin.CloseOpener();
+    }
+
+    // ---- Success: the opener done with no mistake and nothing missed.
+
+    private const float FadeOut = 0.7f;
+
+    /// <summary>Seconds since the opener was done without a mistake (null otherwise, or with the animations off).</summary>
+    private float? SuccessAge =>
+        Fx.Enabled && run is { FinishedUtc: { } finished, Mistakes: 0 } done && done.Missed == 0
+            ? (float)(DateTime.UtcNow - finished).TotalSeconds
+            : null;
+
+    /// <summary>The window's alpha: fading out after a success when it closes by itself.</summary>
+    public float SuccessAlpha =>
+        plugin.Configuration.OpenerAutoClose && SuccessAge is { } age && age > EdgeBeam.Run + EdgeBeam.Flash
+            ? 1 - Fx.Clamp01((age - EdgeBeam.Run - EdgeBeam.Flash) / FadeOut)
+            : 1;
+
+    /// <summary>The light running around the window (full or compact) and its flash, after a success.</summary>
+    public void DrawSuccess()
+    {
+        if (SuccessAge is { } age)
+            EdgeBeam.Draw(age);
     }
 
     /// <summary>The game only accepts /countdown out of combat, and not while one is running.</summary>
@@ -707,8 +740,41 @@ public sealed class OpenerWindow : Window
             draw.AddText(new Vector2(px + Theme.Px(4), origin.Y + pullAt.Row * rowHeight), Theme.U32(Theme.Gold), Loc.T("Pull"));
         }
 
+        // The chain between the steps done in a row, each link drawn when its step is done; sparks on a step done.
+        if (!ReferenceEquals(chainRun, current) || chainDone.Length != steps.Count)
+        {
+            chainRun = current;
+            chainDone = new float[steps.Count];
+            for (var i = 0; i < steps.Count; i++)
+                chainDone[i] = current.States[i] == StepState.Done ? -100f : float.NaN;
+        }
+
+        Vector2 Center(int i) => new(origin.X + positions[i].X + (steps[i].IsGcd ? gcdSize : ogcdSize) / 2,
+                                     (steps[i].IsGcd ? GcdY(positions[i].Row) + gcdSize / 2 : OgcdY(positions[i].Row) + ogcdSize / 2));
+        for (var i = 0; i < steps.Count; i++)
+        {
+            if (current.States[i] != StepState.Done)
+            {
+                chainDone[i] = float.NaN;
+                continue;
+            }
+
+            if (float.IsNaN(chainDone[i]))
+            {
+                chainDone[i] = Fx.Now;
+                chainSparks.Burst(Center(i), Theme.Good, 14, 0.8f);
+            }
+
+            if (!Fx.Enabled || i == 0 || current.States[i - 1] != StepState.Done || positions[i].Row != positions[i - 1].Row)
+                continue;
+            var k = Fx.EaseOut((Fx.Now - chainDone[i]) / 0.3f);
+            var from = Center(i - 1);
+            draw.AddLine(from, from + (Center(i) - from) * k, Theme.U32(Theme.Good, 0.55f), Theme.Px(2) * scale);
+        }
+
         var next = current.Next;
         var wrongFlash = current.LastWrong is { } w && (DateTime.UtcNow - w.When).TotalSeconds < 0.6 ? w.Step : -1;
+        var wrongAge = current.LastWrong is { } lastWrong ? (float)(DateTime.UtcNow - lastWrong.When).TotalSeconds : 100f;
         var gcdNumber = 0;
         var mouse = ImGui.GetMousePos();
         var hovered = ImGui.IsWindowHovered();
@@ -719,7 +785,20 @@ public sealed class OpenerWindow : Window
             var size = step.IsGcd ? gcdSize : ogcdSize;
             var (r, bx) = positions[i];
             var pos = new Vector2(origin.X + bx, step.IsGcd ? GcdY(r) : OgcdY(r));
+            // A wrong press: the step expected shakes.
+            if (Fx.Enabled && i == wrongFlash && wrongAge < 0.4f)
+                pos.X += MathF.Sin(wrongAge * 70) * Theme.Px(4) * (1 - wrongAge / 0.4f) * scale;
             var max = pos + new Vector2(size, size);
+
+            // The step expected next breathes, a halo around it.
+            if (Fx.Enabled && i == next && current.States[i] == StepState.Pending && i != wrongFlash)
+            {
+                var breath = 0.5f + 0.5f * MathF.Sin(Fx.Now * 4f);
+                var grow = new Vector2(Theme.Px(2 + 3 * breath) * scale);
+                draw.AddRect(pos - grow, max + grow, Theme.U32(Theme.GoldBright, (0.25f + 0.45f * breath)), Theme.Px(7),
+                             ImDrawFlags.None, Theme.Px(2));
+                Fx.Glow(draw, pos + new Vector2(size / 2), size * 0.18f, Theme.Gold, 0.12f * breath);
+            }
 
             var state = current.States[i];
             var (icon, name) = Info(step);
@@ -744,9 +823,29 @@ public sealed class OpenerWindow : Window
             draw.AddRect(pos, max, border, Theme.Px(5), ImDrawFlags.None, thickness);
 
             if (state == StepState.Done)
+            {
                 DrawMark(draw, pos, size, FontAwesomeIcon.Check, Theme.Good);
+                // Just done: a halo opening around it.
+                var age = Fx.Now - chainDone[i];
+                if (Fx.Enabled && age is >= 0 and < 0.6f)
+                {
+                    var grow = new Vector2(Theme.Px(10) * Fx.EaseOut(age / 0.6f));
+                    draw.AddRect(pos - grow, max + grow, Theme.U32(Theme.Good, 1 - age / 0.6f), Theme.Px(6), ImDrawFlags.None, Theme.Px(2));
+                }
+            }
             else if (state == StepState.Missed)
                 DrawMark(draw, pos, size, FontAwesomeIcon.Times, Theme.Bad);
+
+            // A wrong press: a red cross slammed on the step expected, fading.
+            if (Fx.Enabled && i == wrongFlash && wrongAge < 0.6f)
+            {
+                var slam = Fx.Clamp01(wrongAge / 0.12f);
+                var arm = size * (0.32f + 0.35f * (1 - slam));
+                var center = pos + new Vector2(size / 2);
+                var cross = Theme.U32(Theme.Bad, (1 - wrongAge / 0.6f));
+                draw.AddLine(center - new Vector2(arm), center + new Vector2(arm), cross, Theme.Px(4) * scale);
+                draw.AddLine(center + new Vector2(arm, -arm), center + new Vector2(-arm, arm), cross, Theme.Px(4) * scale);
+            }
 
             // Above a pre-pull step: its planned time. Below a GCD: its number, then the time it was used.
             if (step.Prepull is { } prepull)
@@ -770,10 +869,16 @@ public sealed class OpenerWindow : Window
                 var planned = step.Prepull is { } p ? $", -{p:0.##} s" : string.Empty;
                 var used = current.Times[i] is { } u ? Loc.F("\nUsed at {0:0.0} s",u) : string.Empty;
                 var missed = state == StepState.Missed ? Loc.T("\nMissed") : string.Empty;
-                ImGui.SetTooltip($"{name}{others}\n{kind}{planned}{used}{missed}");
+                Theme.Tooltip($"{name}{others}\n{kind}{planned}{used}{missed}");
             }
         }
+
+        chainSparks.Draw(draw);
     }
+
+    private OpenerRun? chainRun;
+    private float[] chainDone = [];
+    private readonly Sparks chainSparks = new();
 
     private static void DrawMark(ImDrawListPtr draw, Vector2 pos, float size, FontAwesomeIcon icon, Vector4 color)
     {

@@ -75,7 +75,7 @@ public sealed class ConfigWindow : Window
 
     public override void PreDraw()
     {
-        themeScope = Theme.Push();
+        themeScope = Theme.Push(WindowName);
 
         // Back to a page: the height it had when it was left.
         if (restoreHeight is { } restore)
@@ -107,6 +107,8 @@ public sealed class ConfigWindow : Window
     {
         shot.Step();
         Theme.BlurBehind();
+        Ambience.Draw();
+        Backdrop.Draw(Backdrop.Kind.EdgeGrid);
         var sidebarWidth = Theme.Px(170);
         windowSize = ImGui.GetWindowSize();
         var contentTop = ImGui.GetCursorPosY();
@@ -187,7 +189,10 @@ public sealed class ConfigWindow : Window
         // The DPS check page lists its fights in a box filling the window: no limit there.
         fitHeight = section.Draw == (System.Action)DrawDpsCheckTab
                         ? null
-                        : contentTop + Math.Max(navHeight, ImGui.GetCursorPosY() - ImGui.GetStyle().ItemSpacing.Y) + ImGui.GetStyle().WindowPadding.Y;
+                        // Rounded up, with a pixel more: at the window's largest, the page must not be a hair too short
+                        // (it would show a scrollbar for nothing).
+                        : MathF.Ceiling(contentTop + Math.Max(navHeight, ImGui.GetCursorPosY() - ImGui.GetStyle().ItemSpacing.Y)
+                                        + ImGui.GetStyle().WindowPadding.Y) + 2;
 
         // Another page now: remember this one's height, and give the new one its own.
         if (selectedSection != lastPage)
@@ -285,7 +290,7 @@ public sealed class ConfigWindow : Window
                  })
         {
             var on = c.CompactColumns.HasFlag(column);
-            if (ImGui.Checkbox(label, ref on))
+            if (Theme.Checkbox(label, ref on))
             {
                 c.CompactColumns = on ? c.CompactColumns | column : c.CompactColumns & ~column;
                 changed = true;
@@ -294,11 +299,11 @@ public sealed class ConfigWindow : Window
 
         changed |= Checkbox(Loc.T("Show the header"), c.CompactShowHeader, v => c.CompactShowHeader = v);
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Without it, switch DPS / rDPS from the right click menu."));
+            Theme.Tooltip(Loc.T("Without it, switch DPS / rDPS from the right click menu."));
 
         var compactPercent = (int)Math.Round(c.CompactOpacity * 100);
         ImGui.SetNextItemWidth(Theme.Px(240));
-        if (ImGui.SliderInt(Loc.T("Background opacity##compact"), ref compactPercent, 0, 100, "%d%%"))
+        if (Theme.SliderInt(Loc.T("Background opacity##compact"), ref compactPercent, 0, 100, "%d%%"))
         {
             c.CompactOpacity = compactPercent / 100f;
             changed = true;
@@ -323,7 +328,7 @@ public sealed class ConfigWindow : Window
 
             personalFirst = false;
             var on = c.PersonalElements.HasFlag(element);
-            if (ImGui.Checkbox($"{label}##personal", ref on))
+            if (Theme.Checkbox($"{label}##personal", ref on))
             {
                 c.PersonalElements = on ? c.PersonalElements | element : c.PersonalElements & ~element;
                 changed = true;
@@ -334,7 +339,7 @@ public sealed class ConfigWindow : Window
 
         var window = c.GraphWindowSeconds;
         ImGui.SetNextItemWidth(Theme.Px(120));
-        if (ImGui.SliderInt(Loc.T("Rolling DPS window (s)"), ref window, 3, 60))
+        if (Theme.SliderInt(Loc.T("Rolling DPS window (s)"), ref window, 3, 60))
         {
             c.GraphWindowSeconds = window;
             changed = true;
@@ -361,14 +366,14 @@ public sealed class ConfigWindow : Window
             if (i % 2 == 1)
                 ImGui.SameLine(Theme.Px(200));
             var on = c.MainCards.HasFlag(card);
-            if (ImGui.Checkbox($"{label}##card{(int)card}", ref on))
+            if (Theme.Checkbox($"{label}##card{(int)card}", ref on))
             {
                 c.MainCards = on ? c.MainCards | card : c.MainCards & ~card;
                 changed = true;
             }
 
             if (help is not null && ImGui.IsItemHovered())
-                ImGui.SetTooltip(help);
+                Theme.Tooltip(help);
         }
 
         Theme.SectionHeader(Loc.T("Screenshots"));
@@ -407,7 +412,7 @@ public sealed class ConfigWindow : Window
                     focusRename = false;
                 }
 
-                var done = ImGui.InputText("##rename", ref renameBuffer, 64, ImGuiInputTextFlags.EnterReturnsTrue);
+                var done = Theme.InputText("##rename", ref renameBuffer, 64, ImGuiInputTextFlags.EnterReturnsTrue);
                 if (done || ImGui.IsItemDeactivated())
                 {
                     if (renameBuffer.Trim().Length > 0)
@@ -431,7 +436,7 @@ public sealed class ConfigWindow : Window
                         DisplayMetric.Raid => Loc.T("rDPS"),
                         _ => Loc.T("Personal DPS"),
                     };
-                    ImGui.SetTooltip($"{metric}\n{(shown.Count > 0 ? string.Join("\n", shown) : Loc.T("(nothing shown)"))}");
+                    Theme.Tooltip($"{metric}\n{(shown.Count > 0 ? string.Join("\n", shown) : Loc.T("(nothing shown)"))}");
                 }
 
                 if (selected && modified)
@@ -450,8 +455,8 @@ public sealed class ConfigWindow : Window
             }
 
             ImGui.SameLine();
-            if (Theme.IconButton("delete", FontAwesomeIcon.TrashAlt, Loc.T("Delete this preset (hold Ctrl)"), Theme.TextFaint)
-                && ImGui.GetIO().KeyCtrl)
+            var deleteClicked = Theme.IconButton("delete", FontAwesomeIcon.TrashAlt, Loc.T("Delete this preset (hold Ctrl)"), Theme.TextFaint);
+            if (deleteClicked && ImGui.GetIO().KeyCtrl)
             {
                 toDelete = i;
             }
@@ -460,9 +465,12 @@ public sealed class ConfigWindow : Window
             var command = $"/raidcompanion preset {i + 1}";
             ImGui.TextDisabled(command);
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(Loc.T("Click to copy the command, for a macro."));
+                Theme.Tooltip(Loc.T("Click to copy the command, for a macro."));
             if (ImGui.IsItemClicked())
+            {
                 ImGui.SetClipboardText(command);
+                Toasts.Show(Loc.T("Copied to the clipboard"), Dalamud.Interface.FontAwesomeIcon.Clipboard);
+            }
         }
 
         if (toDelete is { } index)
@@ -492,7 +500,7 @@ public sealed class ConfigWindow : Window
             }
 
             if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                ImGui.SetTooltip(Loc.T("Reloads the settings saved in the preset."));
+                Theme.Tooltip(Loc.T("Reloads the settings saved in the preset."));
 
             ImGui.SameLine();
         }
@@ -552,7 +560,7 @@ public sealed class ConfigWindow : Window
         Theme.SectionHeader(Loc.T("Background"));
         var percent = (int)Math.Round(c.BackgroundOpacity * 100);
         ImGui.SetNextItemWidth(Theme.Px(240));
-        if (ImGui.SliderInt(Loc.T("Background opacity"), ref percent, 20, 100, "%d%%"))
+        if (Theme.SliderInt(Loc.T("Background opacity"), ref percent, 20, 100, "%d%%"))
         {
             c.BackgroundOpacity = percent / 100f;
             changed = true;
@@ -561,7 +569,7 @@ public sealed class ConfigWindow : Window
         Help(Loc.T("How much of the game shows through the plugin's windows. Text and fields stay opaque."));
 
         var glass = c.GlassEffect;
-        if (ImGui.Checkbox(Loc.T("Glass effect"), ref glass))
+        if (Theme.Checkbox(Loc.T("Glass effect"), ref glass))
         {
             c.GlassEffect = glass;
             changed = true;
@@ -569,17 +577,74 @@ public sealed class ConfigWindow : Window
 
         Help(Loc.T("Turns the theme in use, whichever it is, into frosted glass: see-through windows with the game blurred behind them, light rims and rounder corners."));
 
+        var animations = c.Animations;
+        if (Theme.Checkbox(Loc.T("Animations"), ref animations))
+        {
+            c.Animations = animations;
+            changed = true;
+        }
+
+        Help(Loc.T("The plugin's animations: windows fading in, a light under the mouse on the buttons, the welcome window's motes and stars, the tabs gliding and the cards' figures rolling; in Live and the compact meter, the bars gliding, sparks on a pass and a death's red ring; the pull's ring, the ultimate phase banner and the GCD uptime ring; the opener's chain."));
+        ImGui.SameLine();
+        if (Theme.GhostButton(Loc.T("Show the welcome again")))
+            plugin.ShowWelcome();
+
+        using (ImRaii.Disabled(!c.Animations))
+        {
+            var ambience = c.ThemeAmbience;
+            if (Theme.Checkbox(Loc.T("Theme ambience"), ref ambience))
+            {
+                c.ThemeAmbience = ambience;
+                changed = true;
+            }
+        }
+
+        Help(Loc.T("Faint particles behind the windows, after the theme: snow for Frost, embers for Crimson, fireflies for Emerald, wisps of aether for Aether, dust for Slate, golden motes otherwise."));
+
+        using (ImRaii.Disabled(!c.Animations || !c.ThemeAmbience))
+        {
+            var game = c.GameAmbience;
+            if (Theme.Checkbox(Loc.T("Weather of the game"), ref game))
+            {
+                c.GameAmbience = game;
+                changed = true;
+            }
+        }
+
+        Help(Loc.T("The ambience follows the game: fine rain or snow behind the windows when it rains or snows where you are."));
+
+        using (ImRaii.Disabled(!c.Animations))
+        {
+            var backdrops = c.ViewBackdrops;
+            if (Theme.Checkbox(Loc.T("Backgrounds of the views"), ref backdrops))
+            {
+                c.ViewBackdrops = backdrops;
+                changed = true;
+            }
+        }
+
+        Help(Loc.T("A faint moving background behind some views: a glow in a corner in Live, a corridor of grids in Progression, a hive in Mitigation plans, BiS gearsets, the opener editor and practice (compact too), a grid of hexagons fading from the right side in Settings."));
+
         if (c.GlassEffect)
         {
             var blur = c.GlassBlur;
             ImGui.SetNextItemWidth(Theme.Px(240));
-            if (ImGui.SliderFloat(Loc.T("Blur behind"), ref blur, 0f, 12f, "%.1f"))
+            if (Theme.SliderFloat(Loc.T("Blur behind"), ref blur, 0f, 12f, "%.1f"))
             {
                 c.GlassBlur = blur;
                 changed = true;
             }
 
             Help(Loc.T("Glass effect: how blurred the game is behind the windows. 0 for none."));
+
+            var outline = c.TextOutline;
+            if (Theme.Checkbox(Loc.T("Text outline"), ref outline))
+            {
+                c.TextOutline = outline;
+                changed = true;
+            }
+
+            Help(Loc.T("Glass effect: a dark outline around the grey text of the windows (details, hints, job names, times...), so that it stays readable over a bright game."));
         }
 
         // The colors edited: those of the saved theme in use, otherwise the custom theme.
@@ -609,7 +674,7 @@ public sealed class ConfigWindow : Window
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Saves the colors in use as a theme of its own, which you can rename."));
+            Theme.Tooltip(Loc.T("Saves the colors in use as a theme of its own, which you can rename."));
 
         if (!savedSelected)
         {
@@ -621,7 +686,7 @@ public sealed class ConfigWindow : Window
             }
         }
 
-        using (var table = ImRaii.Table("##customcolors", 2, ImGuiTableFlags.SizingStretchSame))
+        using (var table = Theme.Table("##customcolors", 2, ImGuiTableFlags.SizingStretchSame))
         {
             if (table)
             {
@@ -677,12 +742,13 @@ public sealed class ConfigWindow : Window
             var savedSelected = c.SavedThemeIndex >= 0 && c.SavedThemeIndex < c.SavedThemes.Count;
             var name = savedSelected ? c.SavedThemes[c.SavedThemeIndex].Name : ThemePalette.Name(c.ThemePreset);
             ImGui.SetClipboardText(c.ActivePalette.Export(name));
+            Toasts.Show(Loc.T("Copied to the clipboard"));
             themeMessage = Loc.T("Theme code copied: paste it anywhere, the other player clicks \"Import a theme\".");
             themeMessageIsError = false;
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Copies a code holding the colors of the theme in use."));
+            Theme.Tooltip(Loc.T("Copies a code holding the colors of the theme in use."));
 
         ImGui.SameLine();
         if (ImGui.Button(Loc.T("Import a theme")))
@@ -708,7 +774,7 @@ public sealed class ConfigWindow : Window
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Adds the theme whose code is in the clipboard to your saved themes, and uses it."));
+            Theme.Tooltip(Loc.T("Adds the theme whose code is in the clipboard to your saved themes, and uses it."));
 
         if (themeMessage.Length > 0)
             ImGui.TextColored(themeMessageIsError ? Theme.Bad : Theme.Good, themeMessage);
@@ -741,7 +807,7 @@ public sealed class ConfigWindow : Window
                     focusRename = false;
                 }
 
-                var done = ImGui.InputText("##rename", ref renameBuffer, 64, ImGuiInputTextFlags.EnterReturnsTrue);
+                var done = Theme.InputText("##rename", ref renameBuffer, 64, ImGuiInputTextFlags.EnterReturnsTrue);
                 if (done || ImGui.IsItemDeactivated())
                 {
                     if (renameBuffer.Trim().Length > 0)
@@ -769,8 +835,8 @@ public sealed class ConfigWindow : Window
             }
 
             ImGui.SameLine();
-            if (Theme.IconButton("delete", FontAwesomeIcon.TrashAlt, Loc.T("Delete this theme (hold Ctrl)"), Theme.TextFaint)
-                && ImGui.GetIO().KeyCtrl)
+            var deleteClicked = Theme.IconButton("delete", FontAwesomeIcon.TrashAlt, Loc.T("Delete this theme (hold Ctrl)"), Theme.TextFaint);
+            if (deleteClicked && ImGui.GetIO().KeyCtrl)
             {
                 toDelete = i;
             }
@@ -906,7 +972,7 @@ public sealed class ConfigWindow : Window
         {
             var text = c.BarSeparator;
             ImGui.SetNextItemWidth(130);
-            if (ImGui.InputText(Loc.T("Custom separator"), ref text, 16))
+            if (Theme.InputText(Loc.T("Custom separator"), ref text, 16))
             {
                 c.BarSeparator = text;
                 changed = true;
@@ -939,7 +1005,7 @@ public sealed class ConfigWindow : Window
         var changed = false;
         var layout = c.BarLayout;
 
-        using var table = ImRaii.Table("##barlayout", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit);
+        using var table = Theme.Table("##barlayout", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit);
         if (!table)
             return false;
 
@@ -977,7 +1043,7 @@ public sealed class ConfigWindow : Window
             ImGui.TableNextColumn();
             var (label, example, help) = Describe(item.Element, c.RankInRole);
             var enabled = item.Enabled;
-            if (ImGui.Checkbox(label, ref enabled))
+            if (Theme.Checkbox(label, ref enabled))
             {
                 item.Enabled = enabled;
                 changed = true;
@@ -997,7 +1063,7 @@ public sealed class ConfigWindow : Window
                 }
 
                 if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip(Loc.T("Click to switch between your rank in the party and your rank in your role."));
+                    Theme.Tooltip(Loc.T("Click to switch between your rank in the party and your rank in your role."));
             }
             else
             {
@@ -1043,7 +1109,7 @@ public sealed class ConfigWindow : Window
         ImGui.TextDisabled(Loc.F("Current zone: {0} ({1})",ZoneName(territory),territory));
 
         ImGui.SetNextItemWidth(220);
-        ImGui.InputTextWithHint("##fightfilter", Loc.T("Search a fight"), ref fightFilter, 64);
+        Theme.InputTextWithHint("##fightfilter", Loc.T("Search a fight"), ref fightFilter, 64);
         ImGui.Spacing();
 
         using (var child = ImRaii.Child("##dpschecks", new Vector2(-1, -1)))
@@ -1113,7 +1179,7 @@ public sealed class ConfigWindow : Window
         // The names are never cut: their column is as wide as the longest one, and the table scrolls when too narrow.
         var nameWidth = NameColumnWidth(Loc.T("Fight"), fights.Select(f => f.Name));
         var layout = CheckTable(fights.Count + (category == FightCategory.Savage ? fights.Count / 4 : 0), nameWidth + Theme.Px(CheckColumnsWidth));
-        using var table = ImRaii.Table($"##fights{id}", 5, layout.Flags, layout.Size, layout.InnerWidth);
+        using var table = Theme.Table($"##fights{id}", 5, layout.Flags, layout.Size, layout.InnerWidth);
         if (!table)
             return false;
 
@@ -1150,7 +1216,7 @@ public sealed class ConfigWindow : Window
             else
                 ImGui.TextUnformatted(fight.Name);
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(here ? Loc.F("You are here (zone {0}).",fight.TerritoryId) : Loc.F("Zone {0}",fight.TerritoryId));
+                Theme.Tooltip(here ? Loc.F("You are here (zone {0}).",fight.TerritoryId) : Loc.F("Zone {0}",fight.TerritoryId));
 
             using (ImRaii.PushColor(ImGuiCol.Text, Theme.TextFaint, builtIn is not null))
             {
@@ -1237,7 +1303,7 @@ public sealed class ConfigWindow : Window
         var nameWidth = NameColumnWidth(Loc.T("Boss"), [phase.Name]);
         // The notes column holds the "Use last wipe" button: keep room for it too.
         var layout = CheckTable(1, nameWidth + Theme.Px(CheckColumnsWidth + 170));
-        using var table = ImRaii.Table("##phase", 5, layout.Flags, layout.Size, layout.InnerWidth);
+        using var table = Theme.Table("##phase", 5, layout.Flags, layout.Size, layout.InnerWidth);
         if (!table)
             return;
 
@@ -1253,7 +1319,7 @@ public sealed class ConfigWindow : Window
         ImGui.TableNextColumn();
         ImGui.TextUnformatted(phase.Name);
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.F("Tracked: {0}",string.Join(", ", phase.TrackedBosses)));
+            Theme.Tooltip(Loc.F("Tracked: {0}",string.Join(", ", phase.TrackedBosses)));
 
         ImGui.TableNextColumn();
         DrawPhaseHp(phase);
@@ -1280,7 +1346,7 @@ public sealed class ConfigWindow : Window
         {
             ImGui.TextDisabled(Loc.T("built-in"));
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(Loc.T("Known enrage of this phase. Type a value to override it, clear the field to go back to it."));
+                Theme.Tooltip(Loc.T("Known enrage of this phase. Type a value to override it, clear the field to go back to it."));
             if (tracker.LastWipes.ContainsKey(phase.Key) || tracker.LastClears.ContainsKey(phase.Key))
                 ImGui.SameLine();
         }
@@ -1290,7 +1356,7 @@ public sealed class ConfigWindow : Window
             if (ImGui.SmallButton(Loc.F("Use last wipe ({0})",NumberFormat.Duration(wipe))))
                 SetPhaseEnrage(phase.Key, Math.Round(wipe.TotalSeconds));
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(Loc.T("Phase time when your last pull ended in this phase, e.g. a wipe to the enrage."));
+                Theme.Tooltip(Loc.T("Phase time when your last pull ended in this phase, e.g. a wipe to the enrage."));
         }
 
         if (tracker.LastClears.TryGetValue(phase.Key, out var clear))
@@ -1347,7 +1413,7 @@ public sealed class ConfigWindow : Window
 
         var customRows = c.Thresholds.Count(t => !IsFightCheck(t));
         var layout = CheckTable(customRows, Theme.Px(60 + 2 * 160 + CheckColumnsWidth + 24));
-        using var table = ImRaii.Table("##thresholds", 7, layout.Flags, layout.Size, layout.InnerWidth);
+        using var table = Theme.Table("##thresholds", 7, layout.Flags, layout.Size, layout.InnerWidth);
         if (!table)
             return changed;
 
@@ -1382,7 +1448,7 @@ public sealed class ConfigWindow : Window
             ImGui.TableNextColumn();
             var name = t.EncounterName;
             ImGui.SetNextItemWidth(-1);
-            if (ImGui.InputText("##enc", ref name, 128))
+            if (Theme.InputText("##enc", ref name, 128))
             {
                 t.EncounterName = name.Trim();
                 changed = true;
@@ -1391,7 +1457,7 @@ public sealed class ConfigWindow : Window
             ImGui.TableNextColumn();
             var label = t.Label;
             ImGui.SetNextItemWidth(-1);
-            if (ImGui.InputText("##label", ref label, 128))
+            if (Theme.InputText("##label", ref label, 128))
             {
                 t.Label = label;
                 changed = true;
@@ -1476,7 +1542,7 @@ public sealed class ConfigWindow : Window
         var lines = FightDefaults.In(territory).Select(d =>
             Loc.F("{0}: {1} HP, enrage ",FightDefaults.LocalName(d.Boss),NumberFormat.Format(d.BossHp, NumberStyle.Grouped))
             + (d.EnrageSeconds > 0 ? NumberFormat.Duration(TimeSpan.FromSeconds(d.EnrageSeconds)) : Loc.T("unknown")));
-        ImGui.SetTooltip(Loc.T("Read from FFLogs: boss HP from recent logs, enrage from the wipes to the enrage after release.\n")
+        Theme.Tooltip(Loc.T("Read from FFLogs: boss HP from recent logs, enrage from the wipes to the enrage after release.\n")
                          + string.Join("\n", lines) + Loc.T("\nType a value to use your own instead."));
     }
 
@@ -1534,7 +1600,7 @@ public sealed class ConfigWindow : Window
 
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
         {
-            ImGui.SetTooltip(Loc.T("Use the max HP of the boss of the current fight (only in this fight's zone).\nFor a fight with several bosses or HP pools, add them up by hand."));
+            Theme.Tooltip(Loc.T("Use the max HP of the boss of the current fight (only in this fight's zone).\nFor a fight with several bosses or HP pools, add them up by hand."));
         }
 
         return changed;
@@ -1595,7 +1661,7 @@ public sealed class ConfigWindow : Window
                         ImGui.NewLine();
                 }
                 var on = c.ChatSummaryElements.HasFlag(element);
-                if (ImGui.Checkbox($"{label}##summary", ref on))
+                if (Theme.Checkbox($"{label}##summary", ref on))
                 {
                     c.ChatSummaryElements = on ? c.ChatSummaryElements | element : c.ChatSummaryElements & ~element;
                     changed = true;
@@ -1664,7 +1730,7 @@ public sealed class ConfigWindow : Window
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Number of pulls saved (10 to 5000, 300 by default). Past it, the oldest pulls are removed when a new one is recorded."));
+            Theme.Tooltip(Loc.T("Number of pulls saved (10 to 5000, 300 by default). Past it, the oldest pulls are removed when a new one is recorded."));
 
         Theme.SectionHeader(Loc.T("Failed mechanics"));
         changed |= Checkbox(Loc.T("Ignore tankbuster vulnerabilities on tanks"), c.MistakesIgnoreTankbusters,
@@ -1697,19 +1763,23 @@ public sealed class ConfigWindow : Window
         ImGui.SetNextItemWidth(-1);
         var hint = detected > 0 ? NumberFormat.Format(detected, NumberStyle.Grouped) : Loc.T("not seen yet");
         var text = manual > 0 ? manual.ToString("0") : string.Empty;
-        if (ImGui.InputTextWithHint("##hp", hint, ref text, 16))
+        if (Theme.InputTextWithHint("##hp", hint, ref text, 16))
         {
             if (double.TryParse(text.Replace(",", string.Empty).Replace(" ", string.Empty), out var value) && value > 0)
                 c.UltimatePhaseHp[phase.Key] = value;
             else
+            {
                 c.UltimatePhaseHp.Remove(phase.Key);
+                if (text.Trim().Length > 0)
+                    Theme.Refuse("##hp");
+            }
             plugin.OnConfigChanged();
         }
 
         if (ImGui.IsItemHovered())
         {
             var bosses = phase.TrackedBosses.Count > 1 ? $" ({string.Join(" + ", phase.TrackedBosses)})" : string.Empty;
-            ImGui.SetTooltip(Loc.F("Combined max HP of the phase's bosses{0}.\n",bosses)
+            Theme.Tooltip(Loc.F("Combined max HP of the phase's bosses{0}.\n",bosses)
                              + (detected > 0 ? Loc.F("Read in game: {0:N0}.\n",detected) : Loc.T("Read automatically the first time the phase is reached.\n"))
                              + Loc.T("Type a value to override it, clear the field to go back to the detected HP."));
         }
@@ -1729,7 +1799,7 @@ public sealed class ConfigWindow : Window
 
     private static bool Checkbox(string label, bool value, System.Action<bool> set)
     {
-        if (!ImGui.Checkbox(label, ref value))
+        if (!Theme.Checkbox(label, ref value))
             return false;
         set(value);
         return true;

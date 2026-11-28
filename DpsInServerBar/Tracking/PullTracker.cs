@@ -33,6 +33,12 @@ public sealed class PullTracker : IDisposable
     private PullInProgress? current;
     private PullOutcome pendingOutcome;
     private PullRecord? lastFinished;
+
+    /// <summary>The last pull finished, and when (the compact meter's summary).</summary>
+    public PullRecord? LastFinished => lastFinished;
+
+    public DateTime LastFinishedUtc => lastFinishedUtc;
+
     private DateTime lastFinishedUtc;
 
     // The chat summary waits for the duty outcome (kill / wipe), which can arrive a bit after the encounter ends.
@@ -185,6 +191,11 @@ public sealed class PullTracker : IDisposable
             YourDamageTimeline = Timeline.Resample(pull.YourPoints, duration),
             PartyDamageTimeline = Timeline.Resample(pull.PartyPoints, duration),
         };
+
+        // A kill beating your best DPS on this fight (the first kill too): a toast.
+        if (record.Outcome == PullOutcome.Kill && record.YourDps > 0
+            && (plugin.History.BestFor(record.Title) is not { } previous || record.YourDps > previous.YourDps))
+            UI.Toasts.Show(Loc.T("New best pull!"), Dalamud.Interface.FontAwesomeIcon.Trophy);
 
         if ((config.RecordedCategories & plugin.ContentCategories.Of(record.TerritoryId)) != 0)
             plugin.History.Add(record, config.MaxHistory);

@@ -20,6 +20,56 @@ namespace DpsInServerBar.Windows;
 /// <summary>The details of a pull (History) and the sections shared with Live.</summary>
 public sealed partial class MainWindow
 {
+    private Guid phasesPull;
+    private float phasesAt = -100f;
+
+    // An ultimate's pull: one segment per phase, filled one after the other up to the phase reached (red where it
+    // ended, all green on a kill).
+    private void DrawPhasesReached(PullRecord pull)
+    {
+        if (UltimateTracker.FightFor(pull.TerritoryId) is not { Phases.Count: > 1 } fight)
+            return;
+        if (phasesPull != pull.Id)
+        {
+            phasesPull = pull.Id;
+            phasesAt = Fx.Enabled ? Fx.Now : -100f;
+        }
+
+        var reached = Math.Clamp(Progression.Phase(pull), 1, fight.Phases.Count);
+        var kill = pull.Outcome == PullOutcome.Kill;
+        var shown = Fx.EaseOut((Fx.Now - phasesAt) / (0.25f + 0.12f * reached)) * reached;
+        var count = fight.Phases.Count;
+        var gap = Theme.Px(3);
+        var width = Math.Min(ImGui.GetContentRegionAvail().X, Theme.Px(70) * count);
+        var segment = (width - gap * (count - 1)) / count;
+        var height = Theme.Px(7);
+        var pos = ImGui.GetCursorScreenPos() + new Vector2(0, Theme.Px(2));
+        var dl = ImGui.GetWindowDrawList();
+        for (var i = 0; i < count; i++)
+        {
+            var min = pos + new Vector2(i * (segment + gap), 0);
+            var max = min + new Vector2(segment, height);
+            dl.AddRectFilled(min, max, Theme.U32(Theme.Surface), height / 2);
+            var fill = Fx.Clamp01(shown - i);
+            if (fill > 0)
+            {
+                var color = kill ? Theme.Good : i == reached - 1 ? Theme.Bad : Theme.Gold;
+                dl.AddRectFilled(min, new Vector2(min.X + segment * fill, max.Y), Theme.U32(color, 0.85f), height / 2);
+                if (fill < 1)
+                    Fx.Glow(dl, new Vector2(min.X + segment * fill, min.Y + height / 2), Theme.Px(2.5f), Theme.GoldBright, 0.9f);
+            }
+
+            var label = fight.Phases[i].Label;
+            var labelWidth = ImGui.CalcTextSize(label).X;
+            if (labelWidth < segment)
+                dl.AddText(new Vector2((min.X + max.X - labelWidth) / 2, max.Y + Theme.Px(2)), Theme.U32(i < reached ? Theme.TextMuted : Theme.TextFaint), label);
+        }
+
+        ImGui.Dummy(new Vector2(width, height + Theme.Px(4) + ImGui.GetTextLineHeight()));
+        if (ImGui.IsItemHovered())
+            Theme.Tooltip(Loc.F("Reached: {0}", UltimateDefinitions.Label(pull.TerritoryId, reached)));
+    }
+
     private void DrawPullDetails(PullRecord pull, PullRecord? compare)
     {
         var config = plugin.Configuration;
@@ -28,6 +78,7 @@ public sealed partial class MainWindow
         ImGui.TextColored(Theme.GoldBright, FightName(pull));
         ImGui.SameLine();
         ImGui.TextColored(Theme.TextMuted, $"{pull.StartUtc.ToLocalTime():g}");
+        DrawPhasesReached(pull);
 
         DrawPullCards(pull, compare);
         DrawPullPersonal(pull, compare);
@@ -73,10 +124,8 @@ public sealed partial class MainWindow
         var series = new List<DpsGraph.Series>();
         graph.AddCurves(series, Loc.T("This pull"), graph.ShowParty ? pull.PartyDamageTimeline : pull.YourDamageTimeline, window);
         if (compare is not null)
-        {
             graph.AddCurves(series, Loc.T("Compared"), graph.ShowParty ? compare.PartyDamageTimeline : compare.YourDamageTimeline,
                             window);
-        }
 
         var threshold = graph.ShowParty ? config.FindThreshold(pull.TerritoryId, pull.Title)?.EffectiveMinPartyDps : null;
         DpsGraph.Draw($"##historygraph{pull.Id}", series, DpsGraph.Height, threshold, pull.PartyDeaths);
@@ -217,10 +266,10 @@ public sealed partial class MainWindow
     }
 
     // A detail table in a foldable line: fixed-width columns get a width, the others stretch.
-    private static ImRaii.TableDisposable DetailTable(string id, params (string Name, float Width)[] columns)
+    private static Theme.ThemeTable DetailTable(string id, params (string Name, float Width)[] columns)
     {
         // As wide as its content: a column with a width keeps it, the others fit what they show.
-        var table = ImRaii.Table(id, columns.Length, ImGuiTableFlags.RowBg | Theme.FitTable);
+        var table = Theme.Table(id, columns.Length, ImGuiTableFlags.RowBg | Theme.FitTable);
         if (!table)
             return table;
         foreach (var (name, width) in columns)
@@ -261,7 +310,7 @@ public sealed partial class MainWindow
         var revive = losses.Where(l => l.Revive).ToList();
         ImGui.TextColored(Theme.Warn, Loc.T("(experimental)"));
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Experimental: an estimate, the strength of Damage Down is not always known. To be checked against your logs."));
+            Theme.Tooltip(Loc.T("Experimental: an estimate, the strength of Damage Down is not always known. To be checked against your logs."));
         // Not checked yet against logs: the figures only once unfolded.
         if (!open)
             return;
@@ -304,7 +353,7 @@ public sealed partial class MainWindow
                     ImGui.TableNextColumn();
                     ImGui.TextColored(l.Guessed ? Theme.TextFaint : Theme.Text, $"{(l.Guessed ? "~" : "")}-{l.Reduction:0%}");
                     if (l.Guessed && ImGui.IsItemHovered())
-                        ImGui.SetTooltip(Loc.T("The game did not send this debuff's strength: the usual one is used (-90% in an ultimate, -25% elsewhere)."));
+                        Theme.Tooltip(Loc.T("The game did not send this debuff's strength: the usual one is used (-90% in an ultimate, -25% elsewhere)."));
                     ImGui.TableNextColumn();
                     ImGui.TextColored(Theme.Bad, Loc.F("{0} damage (-{1} DPS)", Format(l.LostDamage), Format(l.LostDamage / duration)));
                 }
@@ -363,7 +412,7 @@ public sealed partial class MainWindow
                     ImGui.SameLine(0, Theme.Px(10));
                 ActionIcons.Draw(ActionIcons.OfGauge(waste[i].Resource), ImGui.GetTextLineHeight());
                 ImGui.SameLine(0, Theme.Px(4));
-                ImGui.TextColored(Theme.Warn, GaugeAmount(waste[i]));
+                ImGui.TextColored(Theme.Bad, GaugeAmount(waste[i]));
             }
         }
 
@@ -386,7 +435,7 @@ public sealed partial class MainWindow
                         Theme.RowHover();
                         IconCell(ActionIcons.OfGauge(w.Resource), w.Resource);
                         ImGui.TableNextColumn();
-                        ImGui.TextColored(Theme.Warn, GaugeAmount(w));
+                        ImGui.TextColored(Theme.Bad, GaugeAmount(w));
                         ImGui.TableNextColumn();
                         ImGui.TextUnformatted($"{w.Count}×");
                         ImGui.TableNextColumn();
@@ -415,7 +464,7 @@ public sealed partial class MainWindow
             ImGui.SameLine(0, Theme.Px(4));
             ImGui.TextColored(landed == action.Count() ? Theme.Good : Theme.Bad, $"{landed}/{action.Count()}");
             if (hovered || ImGui.IsItemHovered())
-                ImGui.SetTooltip(PositionalTooltip(action.ToList()));
+                Theme.Tooltip(PositionalTooltip(action.ToList()));
         }
 
         if (!open)
@@ -534,7 +583,7 @@ public sealed partial class MainWindow
                 ImGui.SameLine(0, Theme.Px(4));
                 ImGui.TextColored(inTime == list.Count ? Theme.Good : Theme.Bad, $"{inTime}/{list.Count}");
                 if (hovered || ImGui.IsItemHovered())
-                    ImGui.SetTooltip(string.Join("\n", list.Select(PlanMissText)));
+                    Theme.Tooltip(string.Join("\n", list.Select(PlanMissText)));
             }
         }
 
@@ -762,7 +811,7 @@ public sealed partial class MainWindow
             ImGui.SameLine(0, Theme.Px(4));
             ImGui.TextColored(dot.Uptime >= 0.95 ? Theme.Good : dot.Uptime >= 0.85 ? Theme.Warn : Theme.Bad, $"{dot.NameText} {dot.Uptime:0.0%}");
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(Loc.F("Off the boss for {0:0.0}s of {1}",dot.AvailableSeconds - dot.ActiveSeconds,NumberFormat.Duration(TimeSpan.FromSeconds(dot.AvailableSeconds))));
+                Theme.Tooltip(Loc.F("Off the boss for {0:0.0}s of {1}",dot.AvailableSeconds - dot.ActiveSeconds,NumberFormat.Duration(TimeSpan.FromSeconds(dot.AvailableSeconds))));
         }
 
         Theme.HelpMarker(Loc.T("Share of the time your DoT was on the boss, while the boss could be attacked (jumps, transitions and cutscenes left out)."));
@@ -798,7 +847,7 @@ public sealed partial class MainWindow
             ImGui.SameLine(0, Theme.Px(4));
             ImGui.TextColored(h.IsYou ? Theme.GoldBright : Theme.Text, $"{(h.IsYou ? Loc.T("You") : Names.Show(h.Player))} {h.Share:0%}");
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(Loc.F("{0} of {1} healing went over full HP",NumberFormat.Format(h.Overheal, NumberStyle.Compact),NumberFormat.Format(h.Healing, NumberStyle.Compact)));
+                Theme.Tooltip(Loc.F("{0} of {1} healing went over full HP",NumberFormat.Format(h.Overheal, NumberStyle.Compact),NumberFormat.Format(h.Healing, NumberStyle.Compact)));
         }
 
         if (foldable)
@@ -830,7 +879,7 @@ public sealed partial class MainWindow
 
     private static void DrawTankSwapTable(IReadOnlyList<TankSwap> swaps)
     {
-        using (var table = ImRaii.Table("##tankswaps", 3, ImGuiTableFlags.RowBg | Theme.FitTable))
+        using (var table = Theme.Table("##tankswaps", 3, ImGuiTableFlags.RowBg | Theme.FitTable))
         {
             if (table)
             {
@@ -882,7 +931,7 @@ public sealed partial class MainWindow
             ImGui.TextColored(landed == list.Count ? Theme.Good : Theme.Bad,
                               names ? $"{GameNames.Action(list[0].ActionId, list[0].Action)} {count}" : count);
             if (hovered || ImGui.IsItemHovered())
-                ImGui.SetTooltip(PositionalTooltip(list));
+                Theme.Tooltip(PositionalTooltip(list));
         }
 
         Theme.HelpMarker(
@@ -925,7 +974,7 @@ public sealed partial class MainWindow
                 ImGui.SameLine(0, Theme.Px(4));
                 ImGui.TextColored(Theme.Bad, names ? $"{ComboMistakeName(list[0])} ×{list.Count}" : $"×{list.Count}");
                 if (hovered || ImGui.IsItemHovered())
-                    ImGui.SetTooltip(string.Join("\n", list.Select(ComboMistakeText)));
+                    Theme.Tooltip(string.Join("\n", list.Select(ComboMistakeText)));
             }
         }
 
@@ -992,7 +1041,7 @@ public sealed partial class MainWindow
                          : 0;
         var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingStretchProp
                     | (clips.Count > visibleRows ? ImGuiTableFlags.ScrollY : ImGuiTableFlags.None);
-        using var table = ImRaii.Table("##cliptable", 4, flags, new Vector2(-1, height));
+        using var table = Theme.Table("##cliptable", 4, flags, new Vector2(-1, height));
         if (!table)
             return;
 
@@ -1010,7 +1059,7 @@ public sealed partial class MainWindow
             ActionIcons.Draw(ActionIcons.OfAction(actionId), size);
             ImGui.GetWindowDrawList().AddRect(pos, pos + new Vector2(size, size), Theme.U32(frame, 0.8f), Theme.Px(3), ImDrawFlags.None, Theme.Px(1.5f));
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(ActionIcons.NameOf(actionId));
+                Theme.Tooltip(ActionIcons.NameOf(actionId));
         }
 
         void TextCell(string text, Vector4 color)
@@ -1140,7 +1189,7 @@ public sealed partial class MainWindow
         ImGui.TextColored(Theme.TextFaint, end);
 
         if (tooltip is not null)
-            ImGui.SetTooltip(tooltip);
+            Theme.Tooltip(tooltip);
     }
 
     /// <summary>One line with the gauge lost to overcapping, per gauge, and the actions that overcapped.</summary>
@@ -1158,14 +1207,14 @@ public sealed partial class MainWindow
             ImGui.SameLine(0, Theme.Px(8));
             var iconHovered = ActionIcons.Draw(ActionIcons.OfGauge(w.Resource), ImGui.GetTextLineHeight());
             if (iconHovered && w.Actions.Length > 0)
-                ImGui.SetTooltip(Loc.F("Overcapped by: {0}",w.Actions));
+                Theme.Tooltip(Loc.F("Overcapped by: {0}",w.Actions));
             ImGui.SameLine(0, Theme.Px(4));
             var amount = w.Max <= 5 ? $"{w.Wasted:0.#}" : $"{w.Wasted:0}";
-            ImGui.TextColored(Theme.Warn, $"{w.Resource} {amount}");
+            ImGui.TextColored(Theme.Bad, $"{w.Resource} {amount}");
             ImGui.SameLine(0, Theme.Px(4));
             ImGui.TextColored(Theme.TextFaint, w.Count > 1 ? $"({w.Count}×)" : "(1×)");
             if (ImGui.IsItemHovered() && w.Actions.Length > 0)
-                ImGui.SetTooltip(Loc.F("Overcapped by: {0}",w.Actions));
+                Theme.Tooltip(Loc.F("Overcapped by: {0}",w.Actions));
         }
 
         Theme.HelpMarker(
@@ -1186,7 +1235,7 @@ public sealed partial class MainWindow
             return;
 
         var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | Theme.FitTable | ImGuiTableFlags.PadOuterX;
-        using var table = ImRaii.Table("##deaths", 3, flags);
+        using var table = Theme.Table("##deaths", 3, flags);
         if (!table)
             return;
 
@@ -1345,7 +1394,7 @@ public sealed partial class MainWindow
                               .ToList();
 
         var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | Theme.FitTable | ImGuiTableFlags.PadOuterX;
-        using (var table = ImRaii.Table("##mistakes", 3, flags))
+        using (var table = Theme.Table("##mistakes", 3, flags))
         {
             if (table)
             {
@@ -1365,7 +1414,7 @@ public sealed partial class MainWindow
                                      ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowItemOverlap,
                                      new Vector2(0, ImGui.GetTextLineHeight()));
                     if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip(string.Join("\n", p.List.Select(MistakeText)));
+                        Theme.Tooltip(string.Join("\n", p.List.Select(MistakeText)));
                     ImGui.SetCursorPos(start);
                     ImGui.TextColored(p.IsYou ? Theme.GoldBright : Theme.Text, Names.Show(p.Player));
                     ImGui.SameLine();
@@ -1404,11 +1453,17 @@ public sealed partial class MainWindow
     {
         if (uptime is { } share)
         {
+            // Live: a ring filling to the uptime.
+            var ring = ImGui.GetTextLineHeight();
+            var ringPos = ImGui.GetCursorScreenPos();
+            ImGui.Dummy(new Vector2(ring, ring));
+            Ring.Draw(ImGui.GetWindowDrawList(), ringPos + new Vector2(ring / 2), ring / 2 - Theme.Px(1), (float)share, Theme.Crystal, ImGui.GetID("gcdring"));
+            ImGui.SameLine(0, Theme.Px(6));
             ImGui.TextColored(Theme.TextMuted, Loc.T("GCD uptime"));
             ImGui.SameLine(0, Theme.Px(6));
             ImGui.TextColored(Theme.Crystal, $"{share:0.0%}");
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(Loc.F("{0} GCDs used\n{1:0.0}s lost with the boss targetable and your GCD ready",gcd.GcdCount,lostSeconds));
+                Theme.Tooltip(Loc.F("{0} GCDs used\n{1:0.0}s lost with the boss targetable and your GCD ready",gcd.GcdCount,lostSeconds));
             return; // Live: the overall value only, the breakdown is in the history
         }
 
@@ -1454,7 +1509,8 @@ public sealed partial class MainWindow
     /// <summary>
     /// Player table, sized to its rows: job icon, name over a damage bar in the role's color, then the figures.
     /// </summary>
-    private void DrawCombatantTable(IEnumerable<PullCombatant> combatants)
+    // Live: the snapshot shown, for the bars' animations (none in the history).
+    private void DrawCombatantTable(IEnumerable<PullCombatant> combatants, CombatSnapshot? live = null)
     {
         var rows = combatants.ToList();
         var showRdps = rows.Any(c => c.Rdps is not null);
@@ -1505,7 +1561,7 @@ public sealed partial class MainWindow
                      + ImGui.GetStyle().ScrollbarSize + Theme.Px(2);
         }
 
-        using var table = ImRaii.Table("##combatants", showRdps ? 10 : 8, flags, new Vector2(-1, height), narrow ? minWidth : 0);
+        using var table = Theme.Table("##combatants", showRdps ? 10 : 8, flags, new Vector2(-1, height), narrow ? minWidth : 0);
         if (!table)
             return;
 
@@ -1543,17 +1599,36 @@ public sealed partial class MainWindow
             var value = byRdps ? c.Rdps ?? c.Dps : c.Dps;
             var start = ImGui.GetCursorScreenPos();
             var width = ImGui.GetContentRegionAvail().X;
+            var (dead, sinceRaise) = live is not null ? liveBars.Life(live.StartUtc, c.Name, plugin.Tracker.IsDead(c.Name)) : (0f, 100f);
             if (top > 0)
             {
-                var barColor = JobInfo.RoleColor(c.Job);
-                var end = start + new Vector2(width * (float)Math.Clamp(value / top, 0, 1), iconSize);
-                ImGui.GetWindowDrawList().AddRectFilled(start, end, Theme.U32(barColor, c.IsYou ? 0.34f : 0.2f), Theme.Px(3));
+                var barColor = BarAnimator.LifeColor(JobInfo.RoleColor(c.Job), dead, sinceRaise);
+                var share = (float)Math.Clamp(value / top, 0, 1);
+                var flash = 0f;
+                if (live is not null)
+                    (share, flash) = liveBars.Bar(live.StartUtc, c.Name, share, hasJob ? rank : 0, start, width, iconSize, c.IsYou);
+                var end = start + new Vector2(width * share, iconSize);
+                var dl = ImGui.GetWindowDrawList();
+                dl.AddRectFilled(start, end, Theme.U32(barColor, c.IsYou ? 0.34f : 0.2f), Theme.Px(3));
+                if (live is not null)
+                {
+                    BarAnimator.Overlay(dl, start, end, flash, c.IsYou && dead <= 0);
+                    BarAnimator.Broken(dl, start, end, dead);
+                }
             }
 
+            // Live: a player who just died shakes, a red ring out of the icon.
+            var sinceDeath = live is not null ? liveBars.SinceDeath(live.StartUtc, c.Name, c.Deaths) : 100f;
+            var shake = BarAnimator.Shake(sinceDeath);
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + shake);
             JobInfo.DrawIcon(c.Job, iconSize);
+            if (live is not null)
+                BarAnimator.DeathOverlay(ImGui.GetWindowDrawList(), start + new Vector2(shake + iconSize / 2, iconSize / 2), start,
+                                         start + new Vector2(width, iconSize), sinceDeath);
+            BarAnimator.Raise(ImGui.GetWindowDrawList(), start, start + new Vector2(width, iconSize), sinceRaise);
             ImGui.SameLine(0, Theme.Px(6));
             ImGui.SetCursorPosY(ImGui.GetCursorPosY() + (iconSize - ImGui.GetTextLineHeight()) / 2);
-            ImGui.TextColored(c.IsYou ? Theme.GoldBright : Theme.Text, Names.Show(c.Name));
+            ImGui.TextColored(dead > 0 ? Theme.TextFaint : c.IsYou ? Theme.GoldBright : Theme.Text, Names.Show(c.Name));
 
             void Cell(string text, Vector4? color = null)
             {
@@ -1569,7 +1644,7 @@ public sealed partial class MainWindow
                 Cell(c.Rdps is { } r ? NumberFormat.Format(r, NumberStyle.Grouped) : "-");
                 if (c.Breakdown is { } b && ImGui.IsItemHovered())
                 {
-                    ImGui.SetTooltip(
+                    Theme.Tooltip(
                         Loc.F("Given to others' buffs: -{0} DPS\n",NumberFormat.Format(b.GivenDps, NumberStyle.Grouped))
                         + Loc.F("Received from own buffs: +{0} DPS\n",NumberFormat.Format(b.ReceivedDps, NumberStyle.Grouped))
                         + Loc.F("Crit rate used: {0:0.0%}   DH rate used: {1:0.0%}\n",b.CritRate,b.DirectHitRate)

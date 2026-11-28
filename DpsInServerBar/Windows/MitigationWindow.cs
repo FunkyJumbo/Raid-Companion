@@ -77,7 +77,7 @@ public sealed class MitigationWindow : Window
 
     public override void PreDraw()
     {
-        themeScope = Theme.Push();
+        themeScope = Theme.Push(WindowName);
 
         // Editing: no wider than the editor (its last column would stretch). The list: as wide as wished.
         var max = Editing() is { } plan ? MitigationTable.WindowWidthFor(EditorWidth(plan)) / Dalamud.Interface.Utility.ImGuiHelpers.GlobalScale : 5000;
@@ -99,6 +99,8 @@ public sealed class MitigationWindow : Window
     {
         shot.Step();
         Theme.BlurBehind();
+        Ambience.Draw();
+        Backdrop.Draw(Backdrop.Kind.Hive);
         if (Editing() is { } plan)
         {
             DrawEditorBar(plan);
@@ -172,7 +174,7 @@ public sealed class MitigationWindow : Window
     private void DrawListBar()
     {
         ImGui.SetNextItemWidth(Theme.Px(280));
-        ImGui.InputTextWithHint("##plansearch", Loc.T("Search a fight or a plan"), ref search, 64);
+        Theme.InputTextWithHint("##plansearch", Loc.T("Search a fight or a plan"), ref search, 64);
 
         ImGui.SameLine();
         if (Theme.IconButton("newplan", FontAwesomeIcon.Plus, Loc.T("New plan, for a fight of the History")))
@@ -241,6 +243,7 @@ public sealed class MitigationWindow : Window
                       + Theme.IconButtonWidth(FontAwesomeIcon.Copy) + style.ItemSpacing.X
                       + Theme.IconButtonWidth(FontAwesomeIcon.Trash);
         using var list = ImRaii.Child("##planlist", new Vector2(-1, -1));
+        planFlow.Begin(search);
         foreach (var fight in fights)
         {
             var encounter = plugin.ContentCategories.DisplayName(fight.Key, fight.First().Encounter) ?? fight.First().Encounter;
@@ -250,6 +253,7 @@ public sealed class MitigationWindow : Window
                 continue;
 
             any = true;
+            planFlow.Row(encounter);
             ImGui.TextColored(Theme.Gold, encounter);
             if (fight.Key == here)
             {
@@ -263,6 +267,7 @@ public sealed class MitigationWindow : Window
                 ImGui.SetCursorPosX(ImGui.GetCursorPosX() + Theme.Px(14));
                 var active = Config.MitigationActive.TryGetValue(plan.TerritoryId, out var a) && a == plan.Id;
                 ImGui.AlignTextToFramePadding();
+                planFlow.Row(plan.Name);
                 ImGui.TextUnformatted(plan.Name);
                 if (active)
                 {
@@ -284,9 +289,9 @@ public sealed class MitigationWindow : Window
                 }
 
                 ImGui.SameLine();
-                using (ImRaii.Disabled(!ImGui.GetIO().KeyCtrl))
                 {
-                    if (Theme.IconButton("deleteplan", FontAwesomeIcon.Trash, Loc.T("Delete this plan (hold Ctrl)")))
+                    var deleteClicked = Theme.IconButton("deleteplan", FontAwesomeIcon.Trash, Loc.T("Delete this plan (hold Ctrl)"));
+                    if (deleteClicked && ImGui.GetIO().KeyCtrl)
                     {
                         Config.MitigationPlans.Remove(plan);
                         if (active)
@@ -297,13 +302,12 @@ public sealed class MitigationWindow : Window
                     }
                 }
 
-                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                    ImGui.SetTooltip(Loc.T("Delete this plan (hold Ctrl)"));
             }
 
             ImGui.Spacing();
         }
 
+        planFlow.End();
         if (!any)
             Theme.Hint(Loc.T("No plan for this search."));
     }
@@ -374,7 +378,7 @@ public sealed class MitigationWindow : Window
     {
         var name = plan.Name;
         ImGui.SetNextItemWidth(Theme.Px(260));
-        if (ImGui.InputText(Loc.T("Name"), ref name, 80))
+        if (Theme.InputText(Loc.T("Name"), ref name, 80))
             plan.Name = name;
         SaveWhenDone();
 
@@ -411,7 +415,7 @@ public sealed class MitigationWindow : Window
     {
         var flags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.ScrollY
                     | ImGuiTableFlags.ScrollX;
-        using (var editTable = ImRaii.Table("##mitedit", plan.Columns.Count + 4, flags, new Vector2(-1, -ImGui.GetFrameHeightWithSpacing())))
+        using (var editTable = Theme.Table("##mitedit", plan.Columns.Count + 4, flags, new Vector2(-1, -ImGui.GetFrameHeightWithSpacing())))
         {
             if (editTable)
             {
@@ -448,22 +452,27 @@ public sealed class MitigationWindow : Window
 
                     ImGui.TableNextRow();
                     Theme.RowHover();
+                    // A row just moved: it lights up in its new place, the one it swapped with more faintly.
+                    var sinceMove = (Fx.Now - movedAt) / 0.7f;
+                    if (sinceMove is >= 0 and < 1 && (ReferenceEquals(row, movedRow) || ReferenceEquals(row, swappedRow)))
+                        ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg1,
+                                              Theme.U32(Theme.Gold, (ReferenceEquals(row, movedRow) ? 0.4f : 0.15f) * (1 - Fx.EaseOut(sinceMove))));
 
                     ImGui.TableNextColumn();
                     var rowTop = ImGui.GetCursorScreenPos().Y;
                     // The row's note: shown in the "?" next to its cast in the plan.
                     var note = row.Note;
                     ImGui.SetNextItemWidth(-1);
-                    if (ImGui.InputText("##note", ref note, 300))
+                    if (Theme.InputText("##note", ref note, 300))
                         row.Note = note;
                     SaveWhenDone();
                     if (ImGui.IsItemHovered() && row.Note.Length > 0)
-                        ImGui.SetTooltip(row.Note);
+                        Theme.Tooltip(row.Note);
 
                     ImGui.TableNextColumn();
                     var cast = row.Name;
                     ImGui.SetNextItemWidth(-1);
-                    if (ImGui.InputTextWithHint("##cast", row.Prepull ? Loc.T("Pre-pull") : string.Empty, ref cast, 80))
+                    if (Theme.InputTextWithHint("##cast", row.Prepull ? Loc.T("Pre-pull") : string.Empty, ref cast, 80))
                         row.Name = cast;
                     SaveWhenDone();
 
@@ -483,6 +492,9 @@ public sealed class MitigationWindow : Window
 
                 if (move.From >= 0)
                 {
+                    movedRow = plan.Rows[move.From];
+                    swappedRow = plan.Rows[move.To];
+                    movedAt = Fx.Enabled ? Fx.Now : -100f;
                     (plan.Rows[move.From], plan.Rows[move.To]) = (plan.Rows[move.To], plan.Rows[move.From]);
                     Config.Save();
                 }
@@ -514,7 +526,7 @@ public sealed class MitigationWindow : Window
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("A row for the skills used before the pull, with when they are used (8 s before...). One row per time."));
+            Theme.Tooltip(Loc.T("A row for the skills used before the pull, with when they are used (8 s before...). One row per time."));
 
         ImGui.SameLine();
         if (ImGui.Button(Loc.T("Add a separator")))
@@ -524,7 +536,7 @@ public sealed class MitigationWindow : Window
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("A line across the plan (a limit cut, an add phase, or the phases on one page), with a word on it if you like. Move it with the arrows."));
+            Theme.Tooltip(Loc.T("A line across the plan (a limit cut, an add phase, or the phases on one page), with a word on it if you like. Move it with the arrows."));
     }
 
     // The tab the editor shows (rows added go in it).
@@ -542,7 +554,7 @@ public sealed class MitigationWindow : Window
         ImGui.SetNextItemWidth(-1);
         using (ImRaii.PushColor(ImGuiCol.Text, Theme.GoldBright))
         {
-            if (ImGui.InputTextWithHint("##separator", Loc.T("Label (optional)"), ref label, 60))
+            if (Theme.InputTextWithHint("##separator", Loc.T("Label (optional)"), ref label, 60))
                 row.Name = label;
         }
 
@@ -554,6 +566,10 @@ public sealed class MitigationWindow : Window
         for (var c = 0; c < plan.Columns.Count; c++)
             ImGui.TableNextColumn();
     }
+
+    private readonly SearchFlow planFlow = new();
+    private MitigationRow? movedRow, swappedRow;
+    private float movedAt = -100f;
 
     // The arrows and the cross of a row: moved within its tab, or removed (true).
     private static bool DrawRowTools(int k, List<int> inTab, ref (int From, int To) move)
@@ -599,7 +615,7 @@ public sealed class MitigationWindow : Window
         if (Theme.Chip("+", false))
             ImGui.OpenPopup("##addposition");
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Add a position"));
+            Theme.Tooltip(Loc.T("Add a position"));
 
         using var popup = ImRaii.Popup("##addposition");
         if (!popup)
@@ -642,7 +658,7 @@ public sealed class MitigationWindow : Window
 
         ImGui.NewLine();
         ImGui.SetNextItemWidth(Theme.Px(160));
-        if (ImGui.InputText(Loc.T("Name"), ref positionName, 30) && positionName.Trim().Length > 0)
+        if (Theme.InputText(Loc.T("Name"), ref positionName, 30) && positionName.Trim().Length > 0)
             plan.Columns[column] = positionName.Trim();
         SaveWhenDone();
 
@@ -686,13 +702,13 @@ public sealed class MitigationWindow : Window
         ImGui.TableNextColumn();
         ImGui.TextColored(Theme.GoldBright, Loc.T("Part"));
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("A part of the fight (a gold line above its first cast in the plan). Clear it to remove the line."));
+            Theme.Tooltip(Loc.T("A part of the fight (a gold line above its first cast in the plan). Clear it to remove the line."));
 
         ImGui.TableNextColumn();
         var title = old;
         ImGui.SetNextItemWidth(-1);
         using (ImRaii.PushColor(ImGuiCol.Text, Theme.GoldBright))
-            ImGui.InputText("##parttitle", ref title, 80);
+            Theme.InputText("##parttitle", ref title, 80);
         if (ImGui.IsItemDeactivatedAfterEdit() && title != old)
         {
             for (var i = first; i < plan.Rows.Count && plan.Rows[i].Phase == old; i++)
@@ -718,7 +734,7 @@ public sealed class MitigationWindow : Window
             row.PrepullSeconds = before > 0 ? Math.Round(before, 1) : null;
         SaveWhenDone();
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("When the skills of this row are used: seconds before the pull."));
+            Theme.Tooltip(Loc.T("When the skills of this row are used: seconds before the pull."));
     }
 
     private static float NoteWidth => Theme.Px(110);
@@ -755,14 +771,14 @@ public sealed class MitigationWindow : Window
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("The cast of the timeline this row stands for: the plan follows the pull with it."));
+            Theme.Tooltip(Loc.T("The cast of the timeline this row stands for: the plan follows the pull with it."));
 
         using var popup = ImRaii.Popup("##linkcast");
         if (!popup)
             return;
 
         ImGui.SetNextItemWidth(Theme.Px(220));
-        ImGui.InputTextWithHint("##linkfilter", Loc.T("Search a cast"), ref castFilter, 64);
+        Theme.InputTextWithHint("##linkfilter", Loc.T("Search a cast"), ref castFilter, 64);
         if (ImGui.Selectable(Loc.T("Not linked")))
             MitigationPlans.Unlink(row);
         using var list = ImRaii.Child("##linklist", new Vector2(Theme.Px(320), Theme.Px(300)));
@@ -816,10 +832,10 @@ public sealed class MitigationWindow : Window
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Links the rows not linked yet to the casts of this pull named like them (the second row named like a cast goes to its second use)."));
+            Theme.Tooltip(Loc.T("Links the rows not linked yet to the casts of this pull named like them (the second row named like a cast goes to its second use)."));
 
         ImGui.SetNextItemWidth(-1);
-        ImGui.InputTextWithHint("##castfilter", Loc.T("Search a cast"), ref castFilter, 64);
+        Theme.InputTextWithHint("##castfilter", Loc.T("Search a cast"), ref castFilter, 64);
 
         foreach (var (cast, occurrence) in Filtered(casts))
         {
@@ -830,7 +846,7 @@ public sealed class MitigationWindow : Window
                 AddRow(plan, cast, occurrence);
 
             if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                ImGui.SetTooltip(inPlan ? Loc.T("Already in the plan.") : Loc.F("{0}, cast by {1}", GameNames.Action(cast.ActionId, cast.Action), cast.Caster));
+                Theme.Tooltip(inPlan ? Loc.T("Already in the plan.") : Loc.F("{0}, cast by {1}", GameNames.Action(cast.ActionId, cast.Action), cast.Caster));
         }
     }
 

@@ -24,6 +24,10 @@ public sealed partial class MainWindow
     // the filters, the saved groups, the language or the made-up names change (not on every frame).
     private (IReadOnlyList<PullRecord>? Pulls, string Filter, int SavedGroups, string Language, bool Anonymous) progressionKey;
     private int savedGroupsVersion;
+    private Guid progressionTraceId;
+    private int progressionTraceFrame = -10;
+    private float progressionTraceAt = -100f;
+    private readonly PulseStar progressionMark = new();
     private List<PullRecord> progressionFight = [];
     private List<PullGroup> progressionGroups = [];
     private string? progressionStatsGroup;
@@ -131,6 +135,16 @@ public sealed partial class MainWindow
         }
 
         DrawCards(cards, uniform: true);
+        // How far the best of the chosen pulls got, phase by phase (an ultimate only).
+        if ((prog.FirstOrDefault(p => p.Outcome == PullOutcome.Kill) ?? best) is { } furthestPull)
+            DrawPhasesReached(furthestPull);
+        string Describe(int i) =>
+            Loc.F("Pull {0}  {1} in the instance\n{2:dd/MM HH:mm}  {3}\n",i + 1,NumberFormat.Duration(TimeSpan.FromHours(instanceHours[i])),prog[i].StartUtc.ToLocalTime(),NumberFormat.Duration(TimeSpan.FromSeconds(prog[i].DurationSeconds)))
+            + Progression.Label(prog[i])
+            + (Progression.WipeCause(prog[i]) is { } cause ? Loc.F("\nWiped by {0}",cause) : string.Empty)
+            + (prog[i].Outcome != PullOutcome.Kill && prog[i].LastBossCast.Length > 0 ? Loc.F("\nLast enemy cast: {0}",prog[i].LastBossCastText) : string.Empty)
+            + Loc.T("\nClick to open this pull.");
+        DrawPullWall(prog, scores, Progression.Max(territory), Describe);
 
         if (ultimate)
         {
@@ -154,7 +168,7 @@ public sealed partial class MainWindow
             else
             {
                 var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | Theme.FitTable | ImGuiTableFlags.PadOuterX;
-                using var table = ImRaii.Table("##wipecauses", 3, flags);
+                using var table = Theme.Table("##wipecauses", 3, flags);
                 if (table)
                 {
                     ImGui.TableSetupColumn(Loc.T("Cause"), ImGuiTableColumnFlags.WidthFixed);
@@ -184,19 +198,22 @@ public sealed partial class MainWindow
         if (Theme.Chip(Loc.T("Per time in the instance"), progressionByTime))
             progressionByTime = true;
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Hours spent in the instance: the fights and the time between pulls of a same evening (breaks of more than 30 minutes left out)."));
+            Theme.Tooltip(Loc.T("Hours spent in the instance: the fights and the time between pulls of a same evening (breaks of more than 30 minutes left out)."));
 
         var xs = progressionByTime ? instanceHours.ToList() : Enumerable.Range(1, prog.Count).Select(i => (double)i).ToList();
-        graphTop = ImGui.GetCursorPosY();
+        // The curve traces itself when the view opens (or another fight is chosen), then a star marks the furthest pull.
+        if (ImGui.GetFrameCount() - progressionTraceFrame > 2 || prog[0].Id != progressionTraceId)
+            progressionTraceAt = Fx.Enabled ? Fx.Now : -100f;
+        progressionTraceId = prog[0].Id;
+        progressionTraceFrame = ImGui.GetFrameCount();
+        var reveal = Fx.EaseOut((Fx.Now - progressionTraceAt) / 1.4f);
         var clicked = DpsGraph.DrawProgression(
             "##progression", xs, progressionByTime ? Loc.T("Time in the instance") : Loc.T("Pull"), scores,
             prog.Select(p => p.Outcome == PullOutcome.Kill).ToList(), Progression.Max(territory),
-            ultimate ? Progression.PhaseNames(territory) : null, ImGui.GetContentRegionAvail().Y,
-            i => Loc.F("Pull {0}  {1} in the instance\n{2:dd/MM HH:mm}  {3}\n",i + 1,NumberFormat.Duration(TimeSpan.FromHours(instanceHours[i])),prog[i].StartUtc.ToLocalTime(),NumberFormat.Duration(TimeSpan.FromSeconds(prog[i].DurationSeconds)))
-                 + Progression.Label(prog[i])
-                 + (Progression.WipeCause(prog[i]) is { } cause ? Loc.F("\nWiped by {0}",cause) : string.Empty)
-                 + (prog[i].Outcome != PullOutcome.Kill && prog[i].LastBossCast.Length > 0 ? Loc.F("\nLast enemy cast: {0}",prog[i].LastBossCastText) : string.Empty)
-                 + Loc.T("\nClick to open this pull."));
+            ultimate ? Progression.PhaseNames(territory) : null, DpsGraph.Height,
+            Describe, reveal, progressionMark);
+        // A graph of a set height: the window fits the view, as History does.
+        fitHeight = ImGui.GetCursorPosY() - ImGui.GetStyle().ItemSpacing.Y + ImGui.GetStyle().WindowPadding.Y;
         if (clicked is { } index)
         {
             selectedId = prog[index].Id;
@@ -233,7 +250,7 @@ public sealed partial class MainWindow
                 }
 
                 ImGui.SetNextItemWidth(-1);
-                ImGui.InputTextWithHint("##groupsearch", Loc.T("Search a group or a player"), ref groupSearch, 64);
+                Theme.InputTextWithHint("##groupsearch", Loc.T("Search a group or a player"), ref groupSearch, 64);
 
                 if (groupSearch.Length == 0 && ImGui.Selectable(Loc.F("All pulls ({0})",groups.Sum(g => g.Pulls.Count)), group is null))
                     Choose(string.Empty);
@@ -264,13 +281,13 @@ public sealed partial class MainWindow
                     }
 
                     if (ImGui.IsItemHovered() && g.Members.Length > 0)
-                        ImGui.SetTooltip(g.Members);
+                        Theme.Tooltip(g.Members);
                 }
             }
         }
 
         if (ImGui.IsItemHovered() && group is { Members.Length: > 0 })
-            ImGui.SetTooltip(group.Members);
+            Theme.Tooltip(group.Members);
 
         // Save an automatic group under a name, or rename / forget a saved one.
         if (group is { Key: not "solo" })
@@ -284,7 +301,7 @@ public sealed partial class MainWindow
 
             if (ImGui.IsItemHovered())
             {
-                ImGui.SetTooltip(group.Saved is null
+                Theme.Tooltip(group.Saved is null
                                      ? Loc.T("Give this group a name, to find it easily in the list. Its regular players are kept.")
                                      : Loc.T("Rename this group."));
             }
@@ -303,7 +320,7 @@ public sealed partial class MainWindow
                 }
 
                 if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                    ImGui.SetTooltip(Loc.T("Hold Ctrl to forget this group's name (its pulls are kept)."));
+                    Theme.Tooltip(Loc.T("Hold Ctrl to forget this group's name (its pulls are kept)."));
             }
 
             using var namePopup = ImRaii.Popup("##groupname");
@@ -313,7 +330,7 @@ public sealed partial class MainWindow
                 if (ImGui.IsWindowAppearing())
                     ImGui.SetKeyboardFocusHere();
                 ImGui.SetNextItemWidth(Theme.Px(240));
-                var done = ImGui.InputTextWithHint("##groupnameinput", Loc.T("e.g. Static"), ref groupName, 48, ImGuiInputTextFlags.EnterReturnsTrue);
+                var done = Theme.InputTextWithHint("##groupnameinput", Loc.T("e.g. Static"), ref groupName, 48, ImGuiInputTextFlags.EnterReturnsTrue);
                 ImGui.SameLine();
                 done |= Theme.GhostButton(Loc.T("OK"));
                 if (done && groupName.Trim().Length > 0)
@@ -342,7 +359,7 @@ public sealed partial class MainWindow
         if (Theme.GhostButton(excluded > 0 ? Loc.F("Pulls ({0}/{1})",chosen.Count - excluded,chosen.Count) : Loc.T("Pulls")))
             ImGui.OpenPopup("##progressionpulls");
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Tick the pulls to count, e.g. to leave out a night with another group."));
+            Theme.Tooltip(Loc.T("Tick the pulls to count, e.g. to leave out a night with another group."));
 
         Theme.HelpMarker(Loc.T("Groups are found from the party members of each pull: a pull goes with the group it shares at least half of its players with. Hover a group for its players.\nSave a group under a name to find it easily: its regular players are kept, and the pulls they play together go to it from then on. Saved groups come first, in gold."));
 
@@ -381,10 +398,10 @@ public sealed partial class MainWindow
                     ImGui.Spacing();
                 var ticked = run.Count(x => !x.ExcludedFromProgression);
                 var all = ticked == run.Count;
-                if (ImGui.Checkbox($"{Loc.F("Entry {0}", run[0].StartUtc.ToLocalTime().ToString("dd/MM HH:mm"))}###run{run[0].Id}", ref all))
+                if (Theme.Checkbox($"{Loc.F("Entry {0}", run[0].StartUtc.ToLocalTime().ToString("dd/MM HH:mm"))}###run{run[0].Id}", ref all))
                     SetExcluded(run, !all);
                 if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip(Loc.T("Tick or untick every pull of this entry into the duty."));
+                    Theme.Tooltip(Loc.T("Tick or untick every pull of this entry into the duty."));
                 ImGui.SameLine(Theme.Px(170));
                 var best = run.OrderByDescending(x => Progression.Score(x) ?? -1).First();
                 ImGui.TextColored(Theme.TextMuted, Loc.F("{0}/{1} pulls", ticked, run.Count));
@@ -394,7 +411,7 @@ public sealed partial class MainWindow
 
             using var indent = ImRaii.PushIndent();
             var included = !p.ExcludedFromProgression;
-            if (ImGui.Checkbox($"{p.StartUtc.ToLocalTime():HH:mm}###{p.Id}", ref included))
+            if (Theme.Checkbox($"{p.StartUtc.ToLocalTime():HH:mm}###{p.Id}", ref included))
             {
                 var anchor = list.FindIndex(x => x.Id == lastTickedPull);
                 if (ImGui.GetIO().KeyShift && anchor >= 0)
@@ -440,6 +457,65 @@ public sealed partial class MainWindow
         {
             p.ExcludedFromProgression = excluded;
             plugin.History.Changed(p);
+        }
+    }
+
+    // ---- The wall of pulls: one tile per pull in order, the wipes in red (brighter the further they got), the kills
+    // in green; the tiles land one after the other when the view opens.
+
+    private Guid wallId;
+    private int wallFrame;
+    private float wallAt = -100f;
+
+    private void DrawPullWall(List<PullRecord> prog, IReadOnlyList<double?> scores, double max, Func<int, string> describe)
+    {
+        if (prog.Count == 0)
+            return;
+        if (ImGui.GetFrameCount() - wallFrame > 2 || prog[0].Id != wallId)
+            wallAt = Fx.Enabled ? Fx.Now : -100f;
+        wallId = prog[0].Id;
+        wallFrame = ImGui.GetFrameCount();
+
+        var tile = Theme.Px(12);
+        var gap = Theme.Px(3);
+        var width = ImGui.GetContentRegionAvail().X;
+        var perLine = Math.Max(1, (int)((width + gap) / (tile + gap)));
+        var lines = (prog.Count + perLine - 1) / perLine;
+        var pos = ImGui.GetCursorScreenPos() + new Vector2(0, Theme.Px(4));
+        var dl = ImGui.GetWindowDrawList();
+        var step = Math.Min(0.03f, 1.2f / prog.Count);
+        var mouse = ImGui.GetMousePos();
+        int? hovered = null;
+        for (var i = 0; i < prog.Count; i++)
+        {
+            var age = Fx.Now - wallAt - i * step;
+            if (age < 0)
+                break;
+            var k = Fx.EaseOut(age / 0.25f);
+            var min = pos + new Vector2(i % perLine * (tile + gap), i / perLine * (tile + gap) - (1 - k) * Theme.Px(10));
+            var max2 = min + new Vector2(tile);
+            var kill = prog[i].Outcome == PullOutcome.Kill;
+            var depth = scores.Count > i && scores[i] is { } v && max > 0 ? (float)Math.Clamp(v / max, 0, 1) : 0f;
+            var color = kill ? Theme.Good : Theme.Bad;
+            var alpha = (kill ? 0.95f : 0.25f + 0.65f * depth) * k;
+            dl.AddRectFilled(min, max2, Theme.U32(color, alpha), Theme.Px(3));
+            if (age < 0.3f)
+                dl.AddRect(min - new Vector2(Theme.Px(1)), max2 + new Vector2(Theme.Px(1)), Theme.U32(Theme.GoldBright, 0.7f * (1 - age / 0.3f)), Theme.Px(3));
+            if (mouse.X >= min.X && mouse.Y >= min.Y && mouse.X < max2.X && mouse.Y < max2.Y && ImGui.IsWindowHovered())
+            {
+                hovered = i;
+                dl.AddRect(min - new Vector2(Theme.Px(1)), max2 + new Vector2(Theme.Px(1)), Theme.U32(Theme.GoldBright), Theme.Px(3), ImDrawFlags.None, Theme.Px(1.5f));
+            }
+        }
+
+        ImGui.Dummy(new Vector2(width, lines * (tile + gap) + Theme.Px(6)));
+        if (hovered is not { } index)
+            return;
+        Theme.Tooltip(describe(index));
+        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        {
+            selectedId = prog[index].Id;
+            selectedTab = 1; // open it in History
         }
     }
 }

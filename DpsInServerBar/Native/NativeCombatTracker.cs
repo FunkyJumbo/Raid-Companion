@@ -136,6 +136,9 @@ public sealed unsafe class NativeCombatTracker : IDisposable
     /// <summary>One of your own actions landed (action id), raised from the game thread.</summary>
     public event Action<uint>? LocalActionUsed;
 
+    /// <summary>One of your own actions landed, with what it landed on (action id, target), raised from the game thread.</summary>
+    public event Action<uint, Tracking.ActionTarget>? LocalActionOn;
+
     /// <summary>An enemy action damaged party members (caster name, action id), raised once per action, from the game thread.</summary>
     public event Action<string, uint>? EnemyHit;
 
@@ -219,6 +222,7 @@ public sealed unsafe class NativeCombatTracker : IDisposable
             if (header->ActionType == 1 && isLocal)
             {
                 LocalActionUsed?.Invoke(header->ActionId);
+                LocalActionOn?.Invoke(header->ActionId, TargetOf(header->NumTargets, targetEntityIds));
                 RaiseLocalDamage(header, effects, targetEntityIds);
             }
 
@@ -411,6 +415,19 @@ public sealed unsafe class NativeCombatTracker : IDisposable
     private static long Amount(in ActionEffectHandler.Effect effect) =>
         (effect.Param4 & 0x40) != 0 ? effect.Value + ((long)effect.Param3 << 16) : effect.Value;
 
+    // What one of your actions landed on: the first target (you, a player, or anything else) and how many it hit.
+    private Tracking.ActionTarget TargetOf(int count, GameObjectId* targetEntityIds)
+    {
+        if (count <= 0)
+            return new Tracking.ActionTarget(string.Empty, Tracking.TargetKind.None, 0);
+        var id = (uint)targetEntityIds[0].ObjectId;
+        if (id == objectTable.LocalPlayer?.EntityId)
+            return new Tracking.ActionTarget(string.Empty, Tracking.TargetKind.Self, count);
+        var target = objectTable.SearchByEntityId(id);
+        var kind = target is Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter ? Tracking.TargetKind.Player : Tracking.TargetKind.Other;
+        return new Tracking.ActionTarget(target?.Name.TextValue ?? string.Empty, kind, count);
+    }
+
     private string NameOf(uint entityId) => objectTable.SearchByEntityId(entityId)?.Name.TextValue ?? string.Empty;
 
     private void AddDamage(uint ownerId, uint targetId, long amount, bool crit, bool directHit, uint actionId, uint? dotStatusId)
@@ -501,15 +518,25 @@ public sealed unsafe class NativeCombatTracker : IDisposable
         return found;
     }
 
+    // The party members dead right now (by name), read with the party.
+    private readonly HashSet<string> deadNow = new();
+
+    /// <summary>Whether this party member is dead right now (knocked out, not raised yet).</summary>
+    public bool IsDead(string name) => deadNow.Contains(name);
+
     private void RefreshParty()
     {
         party.Clear();
+        deadNow.Clear();
+        static bool Dead(IGameObject? o) => o is IBattleChara b && (b.IsDead || (b.CurrentHp == 0 && b.MaxHp > 0));
 
         var local = objectTable.LocalPlayer;
         if (local is not null)
         {
             party[local.EntityId] = new PartyMemberInfo(
                 local.Name.TextValue, JobAbbreviation(local.ClassJob.RowId), true);
+            if (Dead(local))
+                deadNow.Add(local.Name.TextValue);
         }
 
         for (var i = 0; i < partyList.Length; i++)
@@ -520,6 +547,8 @@ public sealed unsafe class NativeCombatTracker : IDisposable
 
             party[member.EntityId] = new PartyMemberInfo(
                 member.Name.TextValue, JobAbbreviation(member.ClassJob.RowId), false);
+            if (Dead(member.GameObject))
+                deadNow.Add(member.Name.TextValue);
         }
     }
 

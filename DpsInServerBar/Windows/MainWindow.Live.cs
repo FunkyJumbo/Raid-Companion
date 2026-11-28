@@ -38,6 +38,7 @@ public sealed partial class MainWindow
             ImGui.TextColored(Theme.GoldBright, string.IsNullOrEmpty(enc.Title) ? Loc.T("Encounter") : enc.Title);
             ImGui.SameLine();
             Theme.Badge(NumberFormat.Duration(enc.Duration), Theme.Crystal);
+            DrawPullPulse(snapshot);
             if (!snapshot.IsActive)
             {
                 ImGui.SameLine();
@@ -60,7 +61,37 @@ public sealed partial class MainWindow
         DrawLiveCards(snapshot, partyDps, threshold);
 
         if (plugin.Ultimates.Current is { } phase)
+        {
+            // A new phase of the pull: a banner across the phase's section.
+            var key = $"{phase.Fight.Key} {phase.Label}";
+            if (key != phaseKey)
+            {
+                if (phaseKey.Length > 0 && snapshot.IsActive)
+                {
+                    phaseBanner.Start(phase.Phase is { } p && p.Name != phase.Label ? $"{phase.Label} · {p.Name}" : phase.Label);
+                    if (plugin.Pulls.Current is { } inProgress)
+                    {
+                        if (phaseMarksPull != inProgress.StartUtc)
+                        {
+                            phaseMarksPull = inProgress.StartUtc;
+                            phaseMarks.Clear();
+                        }
+
+                        phaseMarks.Add(new DpsGraph.PhaseMark((DateTime.UtcNow - inProgress.StartUtc).TotalSeconds, phase.Label, Fx.Now));
+                    }
+                }
+                phaseKey = key;
+            }
+
+            var phaseTop = ImGui.GetCursorScreenPos().Y;
             DrawPhase(phase);
+            var window = ImGui.GetWindowPos();
+            phaseBanner.Draw(ImGui.GetWindowDrawList(), new Vector2(window.X, phaseTop), new Vector2(window.X + ImGui.GetWindowWidth(), ImGui.GetCursorScreenPos().Y));
+        }
+        else
+        {
+            phaseKey = string.Empty;
+        }
 
         DrawPersonal(snapshot);
 
@@ -77,7 +108,10 @@ public sealed partial class MainWindow
         }
 
         if (showParty)
-            DrawCombatantTable(liveRows);
+        {
+            DrawCombatantTable(liveRows, live: snapshot);
+            liveBars.Sparks.Draw(ImGui.GetWindowDrawList());
+        }
 
         var liveDeaths = plugin.Tracker.PartyDeaths.Since(snapshot.StartUtc);
         if (liveDeaths.Count > 0)
@@ -88,6 +122,49 @@ public sealed partial class MainWindow
 
         if (Theme.Section(Loc.T("Graph"), FontAwesomeIcon.ChartLine, "live.graph"))
             DrawLiveGraph(threshold);
+    }
+
+    // ---- Animations of the Live tab (off in the Appearance settings): a ring spreading from the timer when a pull
+    // starts and the timer beating during it; the damage bars gliding to their values, a light passing on the top one,
+    // and sparks with a gold flash on a player passing another one.
+
+    private readonly RingWave pullWave = new();
+    private readonly BarAnimator liveBars = new();
+    private readonly Banner phaseBanner = new();
+    private string phaseKey = string.Empty;
+
+    // The phases started during the pull in progress, marked on its graph.
+    private readonly List<DpsGraph.PhaseMark> phaseMarks = [];
+    private DateTime phaseMarksPull;
+    private DateTime pulseStart;
+
+    private void DrawPullPulse(CombatSnapshot snapshot)
+    {
+        var min = ImGui.GetItemRectMin();
+        var max = ImGui.GetItemRectMax();
+        var center = (min + max) / 2;
+
+        // A new pull (one that started a moment ago: not the one in progress when the window opens).
+        if (snapshot.IsActive && snapshot.StartUtc != pulseStart)
+        {
+            pulseStart = snapshot.StartUtc;
+            if ((DateTime.UtcNow - snapshot.StartUtc).TotalSeconds < 5)
+                pullWave.Start();
+        }
+
+        var dl = ImGui.GetWindowDrawList();
+        pullWave.Draw(dl, center, ImGui.GetWindowWidth() * 0.6f, Theme.Gold);
+
+        // The heartbeat: a halo around the timer, beating about once per second during the pull.
+        if (snapshot.IsActive && Fx.Enabled)
+        {
+            var beat = Fx.Beat(Fx.Now);
+            if (beat > 0.02f)
+            {
+                var grow = new Vector2(Theme.Px(2 + 3 * beat));
+                dl.AddRect(min - grow, max + grow, Theme.U32(Theme.Crystal, 0.5f * beat), (max.Y - min.Y) / 2 + grow.Y, ImDrawFlags.None, Theme.Px(1.5f));
+            }
+        }
     }
 
     /// <summary>Compact view and Opener practice, at the right of the line.</summary>
@@ -105,24 +182,24 @@ public sealed partial class MainWindow
         if (Theme.Chip(Loc.T("Compact view"), plugin.CompactOpen))
             plugin.SetCompact(!plugin.CompactOpen);
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Only the party's DPS meter, in a small pop-up window."));
+            Theme.Tooltip(Loc.T("Only the party's DPS meter, in a small pop-up window."));
 
         ImGui.SameLine();
         if (Theme.Chip(Loc.T("Opener practice"), plugin.OpenerOpen))
             plugin.ToggleOpener();
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Practice your job's opener: each action used in the right order is checked off."));
+            Theme.Tooltip(Loc.T("Practice your job's opener: each action used in the right order is checked off."));
 
         ImGui.SameLine();
         if (Theme.Chip(Loc.T("BiS gearset"), plugin.GearOpen))
             plugin.ToggleGear();
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Your best in slot sets: what you own of them and what is missing, framed in your inventory, the shops and the loot."));
+            Theme.Tooltip(Loc.T("Your best in slot sets: what you own of them and what is missing, framed in your inventory, the shops and the loot."));
         ImGui.SameLine();
         if (Theme.Chip(Loc.T("Mitigation plans"), plugin.MitigationOpen))
             plugin.ToggleMitigation();
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Who mitigates what for each cast of the fight. During a pull, the cast in progress and the next one are lit."));
+            Theme.Tooltip(Loc.T("Who mitigates what for each cast of the fight. During a pull, the cast in progress and the next one are lit."));
 
     }
 
@@ -417,6 +494,7 @@ public sealed partial class MainWindow
 
         // One id per pull: a zoom does not carry over to the next pull.
         DpsGraph.Draw($"##livegraph{pull.StartUtc.Ticks}", series, DpsGraph.Height,
-                      graph.ShowParty ? threshold?.EffectiveMinPartyDps : null, plugin.Tracker.PartyDeaths.Since(pull.StartUtc));
+                      graph.ShowParty ? threshold?.EffectiveMinPartyDps : null, plugin.Tracker.PartyDeaths.Since(pull.StartUtc),
+                      phases: phaseMarksPull == pull.StartUtc ? phaseMarks : null);
     }
 }

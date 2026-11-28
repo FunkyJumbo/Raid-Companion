@@ -129,13 +129,19 @@ public class ConfigurationTests
         new(MathF.Round(v.X * 255), MathF.Round(v.Y * 255), MathF.Round(v.Z * 255), MathF.Round(v.W * 255));
 
     [Fact]
-    public void ANewInstallIsMidnightGlassWithBlur8()
+    public void ANewInstallIsMidnightGlassWithBlur12()
     {
         var config = new Configuration();
         config.Migrate();
         Assert.Equal(UI.ThemePreset.Midnight, config.ThemePreset);
         Assert.True(config.GlassEffect);
-        Assert.Equal(8f, config.GlassBlur);
+        Assert.Equal(12f, config.GlassBlur);
+        Assert.Equal(1f, config.BackgroundOpacity);
+        Assert.True(config.Animations);
+        Assert.False(config.ThemeAmbience);
+        Assert.False(config.GameAmbience);
+        Assert.True(config.ViewBackdrops);
+        Assert.False(config.TextOutline);
     }
 
     [Fact]

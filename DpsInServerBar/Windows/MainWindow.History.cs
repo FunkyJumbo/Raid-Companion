@@ -91,6 +91,7 @@ public sealed partial class MainWindow
         else
             (pullListHeight, pullListFullHeight) = (shown, fullHeight);
 
+        Ambience.OccludeNext(new Vector2(-1, shown));
         using (var child = ImRaii.Child("##pulllist", new Vector2(-1, shown), true))
         {
             if (child)
@@ -114,8 +115,8 @@ public sealed partial class MainWindow
     }
 
     /// <summary>
-    /// One chip per kind of content (several can be on), with the number of pulls in each. The Progression tab has its
-    /// own choice, among the content with a real progression only.
+    /// One chip per kind of content, with the number of pulls in each: one kind at a time, or All. The Progression tab
+    /// has its own choice, among the content with a real progression only.
     /// </summary>
     private void DrawCategoryFilter(IReadOnlyList<PullRecord> pulls)
     {
@@ -133,6 +134,7 @@ public sealed partial class MainWindow
 
         var counts = pulls.GroupBy(p => plugin.ContentCategories.Of(p.TerritoryId)).ToDictionary(g => g.Key, g => g.Count());
 
+        var all = (selected & offered) == offered;
         var first = true;
         foreach (var (category, label) in ContentCategories.Labels.Where(l => (offered & l.Category) != 0))
         {
@@ -147,15 +149,14 @@ public sealed partial class MainWindow
             }
 
             first = false;
-            var on = (selected & category) != 0;
-            if (Theme.Chip(text, on))
-                Set(on ? selected & ~category : selected | category);
+            // Clicking a kind shows it alone.
+            if (Theme.Chip(text, !all && (selected & category) != 0))
+                Set(category);
         }
 
         ImGui.SameLine(0, Theme.Px(4));
-        var all = (selected & offered) == offered;
-        if (Theme.Chip(all ? Loc.T("None") : Loc.T("All"), false))
-            Set(all ? ContentCategory.None : offered);
+        if (Theme.Chip(Loc.T("All"), all))
+            Set(offered);
     }
 
     /// <summary>A button by the search of the fights: the expansions to show in the list, to tick.</summary>
@@ -175,7 +176,7 @@ public sealed partial class MainWindow
         foreach (var (id, name) in plugin.ContentCategories.Expansions().Reverse())
         {
             var shown = !config.HiddenExpansions.Contains(id);
-            if (ImGui.Checkbox($"{name} ({counts.GetValueOrDefault(id)})##ex{id}", ref shown))
+            if (Theme.Checkbox($"{name} ({counts.GetValueOrDefault(id)})##ex{id}", ref shown))
             {
                 if (shown)
                     config.HiddenExpansions.Remove(id);
@@ -246,10 +247,11 @@ public sealed partial class MainWindow
 
                 // A fixed width: the list sizes itself to its content, a width taken from it would grow it at each frame.
                 ImGui.SetNextItemWidth(Theme.Px(260) - ImGui.GetFrameHeight() - ImGui.GetStyle().ItemSpacing.X);
-                ImGui.InputTextWithHint("##encountersearch", Loc.T("Search a fight"), ref encounterSearch, 64);
+                Theme.InputTextWithHint("##encountersearch", Loc.T("Search a fight"), ref encounterSearch, 64);
                 ImGui.SameLine();
                 DrawExpansionFilter(pulls);
 
+                encounterFlow.Begin(encounterSearch);
                 if (encounterSearch.Length == 0 && ImGui.Selectable(Loc.T("All"), historyFilter.Length == 0))
                     historyFilter = string.Empty;
                 var category = ContentCategory.None;
@@ -263,13 +265,17 @@ public sealed partial class MainWindow
                     if (kind != category)
                     {
                         category = kind;
-                        ImGui.TextColored(Theme.Gold, $"— {ContentCategories.Labels.FirstOrDefault(l => l.Category == kind).Label ?? Loc.T("Other")} —");
+                        var header = $"— {ContentCategories.Labels.FirstOrDefault(l => l.Category == kind).Label ?? Loc.T("Other")} —";
+                        encounterFlow.Row(header);
+                        ImGui.TextColored(Theme.Gold, header);
                     }
 
+                    encounterFlow.Row($"  {Label(title)}");
                     if (ImGui.Selectable($"  {Label(title)}##{title}", title.Equals(historyFilter, StringComparison.OrdinalIgnoreCase)))
                         historyFilter = title;
                 }
 
+                encounterFlow.End();
                 if (titles.Count == 0 && zoneOf.Count > 0)
                     ImGui.TextDisabled(Loc.T("No fight in the expansions shown."));
             }
@@ -287,8 +293,10 @@ public sealed partial class MainWindow
         }
 
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            ImGui.SetTooltip(Loc.T("Hold Ctrl to delete the whole history."));
+            Theme.Tooltip(Loc.T("Hold Ctrl to delete the whole history."));
     }
+
+    private readonly SearchFlow encounterFlow = new();
 
     /// <summary>A grip under the pull list: drag it down to make the list taller, double-click to bring it back.</summary>
     private void DrawPullListGrip()
@@ -308,7 +316,7 @@ public sealed partial class MainWindow
         if (hovered && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
             pullListExtra = 0;
         if (hovered)
-            ImGui.SetTooltip(Loc.T("Drag to make the list taller, double-click to reset it."));
+            Theme.Tooltip(Loc.T("Drag to make the list taller, double-click to reset it."));
 
         var mid = new Vector2(pos.X + width / 2, pos.Y + height / 2);
         var color = Theme.U32(active ? Theme.Gold : hovered ? Theme.TextMuted : Theme.Line);
@@ -319,13 +327,16 @@ public sealed partial class MainWindow
         }
     }
 
+    private int bestPullsRevision = -1;
+    private HashSet<Guid> bestPulls = [];
+
     private void DrawPullTable(List<PullRecord> pulls)
     {
         // Scrolls sideways in a narrow window rather than squashing the columns.
         const ImGuiTableFlags flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollX
                                       | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.PadOuterX;
         var innerWidth = Math.Max(ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ScrollbarSize, Theme.Px(840));
-        using var table = ImRaii.Table("##pulls", 12, flags, new Vector2(-1, -1), innerWidth);
+        using var table = Theme.Table("##pulls", 12, flags, new Vector2(-1, -1), innerWidth);
         if (!table)
             return;
 
@@ -357,6 +368,15 @@ public sealed partial class MainWindow
             ImGui.TextColored(color ?? Theme.Text, text);
         }
 
+        // The best pull (your DPS) of each fight, starred; the rows arriving one after the other when the list opens.
+        if (bestPullsRevision != plugin.History.Revision)
+        {
+            bestPullsRevision = plugin.History.Revision;
+            bestPulls = plugin.History.Pulls.Where(p => p.Outcome == PullOutcome.Kill && p.YourDps > 0)
+                              .GroupBy(p => p.Title, StringComparer.OrdinalIgnoreCase)
+                              .Select(g => g.MaxBy(p => p.YourDps)!.Id).ToHashSet();
+        }
+
         Guid? toDelete = null;
         foreach (var p in pulls)
         {
@@ -376,7 +396,7 @@ public sealed partial class MainWindow
             // In an ultimate, the time in the phase reached (the whole pull on hover).
             Text(NumberFormat.Duration(TimeSpan.FromSeconds(p.PhaseSeconds ?? p.DurationSeconds)), Theme.TextMuted);
             if (p.PhaseSeconds is not null && ImGui.IsItemHovered())
-                ImGui.SetTooltip(Loc.F("Time in {0}. Whole pull: {1}", UltimateDefinitions.Label(p.TerritoryId, Progression.Phase(p)),
+                Theme.Tooltip(Loc.F("Time in {0}. Whole pull: {1}", UltimateDefinitions.Label(p.TerritoryId, Progression.Phase(p)),
                                        NumberFormat.Duration(TimeSpan.FromSeconds(p.DurationSeconds))));
             ImGui.TableNextColumn();
             ImGui.SetCursorPosY(ImGui.GetCursorPosY() + framePadding - Theme.Px(1));
@@ -411,19 +431,30 @@ public sealed partial class MainWindow
             ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted(p.Job);
             Text(NumberFormat.Format(p.YourDps, NumberStyle.Grouped));
+            if (bestPulls.Contains(p.Id))
+            {
+                ImGui.SameLine(0, Theme.Px(6));
+                var at = ImGui.GetCursorScreenPos() + new Vector2(Theme.Px(5), rowHeight / 2);
+                Shapes.Star(ImGui.GetWindowDrawList(), at, Theme.Px(5), Theme.GoldBright, p.Id.GetHashCode() % 7);
+                ImGui.Dummy(new Vector2(Theme.Px(10), 0));
+                if (ImGui.IsItemHovered())
+                    Theme.Tooltip(Loc.T("Your best pull on this fight"));
+            }
+
             Text(p.YourRdps is { } rd ? NumberFormat.Format(rd, NumberStyle.Grouped) : "-");
             Text(NumberFormat.Format(p.PartyDps, NumberStyle.Grouped));
             Text(p.PartySize > 1 && p.Rank > 0 ? $"{p.Rank}/{p.PartySize}" : "-", Theme.TextMuted);
 
             ImGui.TableNextColumn();
             var isCompare = compareId == p.Id;
-            if (ImGui.Checkbox("##cmp", ref isCompare))
+            if (Theme.Checkbox("##cmp", ref isCompare))
                 compareId = isCompare ? p.Id : null;
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(Loc.T("Compare the selected pull with this one."));
+                Theme.Tooltip(Loc.T("Compare the selected pull with this one."));
 
             ImGui.TableNextColumn();
-            if (Theme.IconButton("del", FontAwesomeIcon.TrashAlt, Loc.T("Delete this pull"), Theme.TextFaint))
+            var deleteClicked = Theme.IconButton("del", FontAwesomeIcon.TrashAlt, Loc.T("Delete this pull (hold Ctrl)"), Theme.TextFaint);
+            if (deleteClicked && ImGui.GetIO().KeyCtrl)
                 toDelete = p.Id;
         }
 

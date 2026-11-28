@@ -71,9 +71,6 @@ public sealed class PositionalTracker
         this.log = log;
     }
 
-    /// <summary>Whether the action has a positional.</summary>
-    public static bool IsPositional(uint actionId) => Defs.ContainsKey(actionId);
-
     /// <summary>Your positional actions in the fight in progress, or in the last one, oldest first.</summary>
     public IReadOnlyList<PositionalUse> Current
     {

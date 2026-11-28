@@ -28,6 +28,14 @@ public sealed class MitigationTable
     // Where the pull in progress is in the plan shown, refreshed a few times per second.
     private DateTime nextRefresh;
     private (int Row, double At) progress = (-1, 0);
+
+    // Your planned mitigation missed on a cast: the row cracks (when each row was seen missed).
+    private readonly Dictionary<int, float> crackedAt = new();
+    private object? crackedPull;
+
+    // A pull ended with the plan held (nothing of yours missed): a green wave down the rows.
+    private DateTime waveFor;
+    private float waveAt = -100f;
     private double elapsed;
     private int scrolledTo = -2;
     private string followed = string.Empty;
@@ -98,7 +106,7 @@ public sealed class MitigationTable
             }
 
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(Loc.T("Tabs for the parts of the fight (a tab per phase...). The rows go in the first one."));
+                Theme.Tooltip(Loc.T("Tabs for the parts of the fight (a tab per phase...). The rows go in the first one."));
             return tab;
         }
 
@@ -152,7 +160,7 @@ public sealed class MitigationTable
 
         var old = plan.Tabs[index];
         ImGui.SetNextItemWidth(Theme.Px(180));
-        if (ImGui.InputText(Loc.T("Name"), ref tabRename, 40, ImGuiInputTextFlags.EnterReturnsTrue) && tabRename.Trim().Length > 0
+        if (Theme.InputText(Loc.T("Name"), ref tabRename, 40, ImGuiInputTextFlags.EnterReturnsTrue) && tabRename.Trim().Length > 0
             && !plan.Tabs.Contains(tabRename.Trim()))
         {
             var renamed = tabRename.Trim();
@@ -180,7 +188,7 @@ public sealed class MitigationTable
     // ---- The plan, as a table
 
     /// <summary>
-    /// The plan, read only (the cells can still be clicked to pick their skills). <paramref name="onlyMine"/>: your
+    /// The plan, read only (to change it: the editor). <paramref name="onlyMine"/>: your
     /// column only, and the rows where it has something.
     /// </summary>
     /// <summary>
@@ -221,7 +229,7 @@ public sealed class MitigationTable
         var flags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.ScrollX
                     | ImGuiTableFlags.SizingFixedFit;
         var tableTop = ImGui.GetCursorPosY();
-        using var table = ImRaii.Table("##mitplan", columns.Count + 2, flags, new Vector2(-1, -1));
+        using var table = Theme.Table("##mitplan", columns.Count + 2, flags, new Vector2(-1, -1));
         if (!table)
             return;
 
@@ -232,6 +240,22 @@ public sealed class MitigationTable
             ImGui.TableSetupColumn($"{plan.Columns[c]}##col{c}", ImGuiTableColumnFlags.WidthFixed, CellWidth);
         DrawHeaders(plan, 2, 0, mine, columns);
 
+        var misses = Following && plugin.PlanCheck.For(plan.TerritoryId).Plan == plan ? plugin.PlanCheck.Live : [];
+        if (!ReferenceEquals(crackedPull, plugin.Pulls.Current))
+        {
+            crackedPull = plugin.Pulls.Current;
+            crackedAt.Clear();
+        }
+
+        if (plugin.Pulls.LastFinishedUtc != waveFor)
+        {
+            waveFor = plugin.Pulls.LastFinishedUtc;
+            if (Fx.Enabled && (DateTime.UtcNow - waveFor).TotalSeconds < 5 && plugin.Pulls.LastFinished is { } ended
+                && ended.TerritoryId == plan.TerritoryId && ended.PlanResults is { Count: > 0 } results && results.All(r => r.Used))
+                waveAt = Fx.Now;
+        }
+
+        var shownRow = 0;
         var phase = string.Empty;
         for (var i = 0; i < plan.Rows.Count; i++)
         {
@@ -264,6 +288,20 @@ public sealed class MitigationTable
 
             ImGui.TableNextRow();
             Theme.RowHover();
+            // The plan held: the wave passing on this row.
+            var wave = Fx.Now - waveAt - shownRow++ * 0.05f;
+            if (wave is > 0 and < 0.6f)
+                ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg1, Theme.U32(Theme.Good, 0.4f * MathF.Sin(wave / 0.6f * MathF.PI)));
+
+            // Your mitigation missed on this cast: a red tint, and the row cracks.
+            var missed = misses.Count > 0 && misses.Any(m => !m.Used && m.Cast == row.Name
+                                                             && (row.AtSeconds is not { } plannedTime || Math.Abs(m.AtSeconds - plannedTime) < 25));
+            if (missed && !crackedAt.ContainsKey(i))
+                crackedAt[i] = Fx.Enabled ? Fx.Now : -100f;
+            if (missed)
+                ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg1, Theme.U32(Theme.Bad, 0.22f));
+
+            // The cast reached, and the next one.
             if (i == now)
                 ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, Theme.U32(Theme.Good, 0.35f));
             else if (i == next)
@@ -273,6 +311,7 @@ public sealed class MitigationTable
             using var color = ImRaii.PushColor(ImGuiCol.Text, Theme.TextFaint, done);
 
             ImGui.TableNextColumn();
+            var timeCell = ImGui.GetCursorScreenPos();
             if (i == next && scrolledTo != next)
             {
                 ImGui.SetScrollHereY(0.3f);
@@ -286,19 +325,53 @@ public sealed class MitigationTable
 
             ImGui.TableNextColumn();
             var rowTop = ImGui.GetCursorScreenPos().Y;
+            var castLeft = ImGui.GetCursorScreenPos().X;
             ImGui.TextWrapped(row.Prepull && row.Name.Length == 0 ? Loc.T("Pre-pull") : row.Name);
+            if (missed)
+                DrawCrack(castLeft, rowTop, ImGui.GetItemRectMax().Y, Fx.Now - crackedAt[i]);
             if (ImGui.IsItemHovered() && row.ActionId != 0)
-                ImGui.SetTooltip(Loc.F("Linked to {0} (use {1} in the pull)", GameNames.Action(row.ActionId, row.Action), row.Occurrence));
+                Theme.Tooltip(Loc.F("Linked to {0} (use {1} in the pull)", GameNames.Action(row.ActionId, row.Action), row.Occurrence));
             if (row.Note.Length > 0)
                 Theme.HelpMarker(row.Note);
 
-            DrawCells(plan, row, i, rowTop, mine, columns);
+            DrawCells(plan, row, i, rowTop, mine, columns, editable: false);
         }
 
         // How tall the rows are, from the lowest thing drawn in them: the window needs no more.
         var inner = ImGuiP.GetCurrentWindow();
         var rowsHeight = inner.DC.CursorMaxPos.Y - inner.Pos.Y + inner.Scroll.Y + ImGui.GetStyle().CellPadding.Y;
         NaturalHeight = tableTop + rowsHeight + ImGui.GetStyle().WindowPadding.Y + Theme.Px(3);
+    }
+
+    // A crack running down the cast's cell, growing in a fraction of a second, with a short shake of light.
+    private static void DrawCrack(float left, float top, float bottom, float age)
+    {
+        var k = Fx.EaseOut(age / 0.3f);
+        var dl = ImGui.GetWindowDrawList();
+        var color = Theme.U32(Theme.Bad, 0.85f);
+        var height = Math.Max(bottom - top, ImGui.GetTextLineHeight());
+        foreach (var x in new[] { CastWidth * 0.62f, CastWidth * 0.86f })
+        {
+            var from = new Vector2(left + x, top - Theme.Px(2));
+            var points = new[]
+            {
+                from, from + new Vector2(Theme.Px(-4), height * 0.3f), from + new Vector2(Theme.Px(3), height * 0.55f),
+                from + new Vector2(Theme.Px(-2), height * 0.8f), from + new Vector2(Theme.Px(2), height + Theme.Px(2)),
+            };
+            var reach = k * (points.Length - 1);
+            for (var p = 0; p < points.Length - 1 && p < reach; p++)
+            {
+                var to = Vector2.Lerp(points[p], points[p + 1], Math.Min(1, reach - p));
+                dl.AddLine(points[p], to, color, Theme.Px(1.4f));
+            }
+
+            // A small branch off the main crack.
+            if (k >= 1)
+                dl.AddLine(points[2], points[2] + Theme.Px(new Vector2(6, 3)), color, Theme.Px(1));
+        }
+
+        if (age is > 0 and < 0.4f)
+            dl.AddRectFilled(new Vector2(left, top), new Vector2(left + CastWidth, top + height), Theme.U32(Theme.Bad, 0.3f * (1 - age / 0.4f)));
     }
 
     /// <summary>A separator row: a line across the table, with its label (if any) on it.</summary>
@@ -356,15 +429,18 @@ public sealed class MitigationTable
 
     // ---- Cells
 
-    /// <summary>The cells of a row (the next columns). A click anywhere in a cell, the whole height of the row, opens its skills.</summary>
-    public void DrawCells(MitigationPlan plan, MitigationRow row, int index, float rowTop, int mine, IReadOnlyList<int>? columns = null)
+    /// <summary>
+    /// The cells of a row (the next columns). <paramref name="editable"/>: a click anywhere in a cell, the whole height of
+    /// the row, opens its skills to change them.
+    /// </summary>
+    public void DrawCells(MitigationPlan plan, MitigationRow row, int index, float rowTop, int mine, IReadOnlyList<int>? columns = null, bool editable = true)
     {
         columns ??= Enumerable.Range(0, plan.Columns.Count).ToList();
         // The row's height is known once all its cells are drawn: the one of the last frame is used.
         var padding = ImGui.GetStyle().CellPadding;
         var lastBottom = rowBottoms.GetValueOrDefault(index, rowTop + IconSize);
         var mouse = ImGui.GetMousePos();
-        var inRow = ImGui.IsWindowHovered() && mouse.Y >= rowTop - padding.Y && mouse.Y <= lastBottom + padding.Y;
+        var inRow = editable && ImGui.IsWindowHovered() && mouse.Y >= rowTop - padding.Y && mouse.Y <= lastBottom + padding.Y;
 
         var bottom = ImGui.GetItemRectMax().Y;
         foreach (var c in columns)
@@ -384,7 +460,7 @@ public sealed class MitigationTable
                     ImGui.OpenPopup($"##pick{c}");
             }
 
-            DrawCell(plan, row, c);
+            DrawCell(plan, row, c, editable);
             bottom = Math.Max(bottom, ImGui.GetItemRectMax().Y);
         }
 
@@ -392,7 +468,7 @@ public sealed class MitigationTable
     }
 
     // The skills of a cell as icons, three per line and centered, and a "?" holding its note.
-    private void DrawCell(MitigationPlan plan, MitigationRow row, int column)
+    private void DrawCell(MitigationPlan plan, MitigationRow row, int column, bool editable)
     {
         var level = PlanActions.FightLevel(plan.TerritoryId);
         var picks = MitigationPlan.Picks(row, column);
@@ -431,7 +507,7 @@ public sealed class MitigationTable
                 // As at the fight's level (Sentinel rather than Guardian in a level 80 fight).
                 var shown = PlanActions.AtLevel(p.ActionId, level) is var at and not 0 ? at : p.ActionId;
                 if (ActionIcons.Draw(ActionIcons.OfAction(shown), size))
-                    ImGui.SetTooltip(GameNames.Action(shown, $"#{shown}"));
+                    Theme.Tooltip(GameNames.Action(shown, $"#{shown}"));
             }
 
             if (last && marker > 0)
@@ -454,7 +530,8 @@ public sealed class MitigationTable
         }
 
         ImGui.EndGroup();
-        DrawPicker(plan, row, column);
+        if (editable)
+            DrawPicker(plan, row, column);
     }
 
     // The skills of the column (its job's, or its role's), to tick, and the note of the cell.
@@ -513,7 +590,7 @@ public sealed class MitigationTable
                 else
                     ImGui.GetWindowDrawList().AddRect(pos, pos + new Vector2(size, size), Theme.U32(Theme.Good, 1f), 3, ImDrawFlags.None, Theme.Px(2));
                 if (hovered)
-                    ImGui.SetTooltip(GameNames.Action(id, family[0]));
+                    Theme.Tooltip(GameNames.Action(id, family[0]));
                 if (ImGui.IsItemClicked())
                 {
                     if (picked)
@@ -528,7 +605,7 @@ public sealed class MitigationTable
         Theme.Rule(2);
         var text = MitigationPlan.Cell(row, column);
         ImGui.SetNextItemWidth(Theme.Px(320));
-        if (ImGui.InputTextWithHint("##celltext", Loc.T("Note (shown on hover of the ?)"), ref text, 200))
+        if (Theme.InputTextWithHint("##celltext", Loc.T("Note (shown on hover of the ?)"), ref text, 200))
             MitigationPlan.SetCell(row, column, text);
         if (ImGui.IsItemDeactivatedAfterEdit())
             changed = true;
@@ -581,7 +658,7 @@ public sealed class MitigationTable
             if (ImGui.IsItemClicked())
                 ImGui.OpenPopup("##colJob");
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(Loc.T("Click to choose the job played in this position: its cells then offer its skills only. Your choice stays with you (a shared plan carries no job)."));
+                Theme.Tooltip(Loc.T("Click to choose the job played in this position: its cells then offer its skills only. Your choice stays with you (a shared plan carries no job)."));
 
             using var popup = ImRaii.Popup("##colJob");
             if (!popup)
@@ -620,11 +697,11 @@ public sealed class MitigationTable
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Your role in this plan: its column is lit, and your mitigations are checked against it."));
+            Theme.Tooltip(Loc.T("Your role in this plan: its column is lit, and your mitigations are checked against it."));
 
         ImGui.SameLine(0, Theme.Px(14));
         var active = Config.MitigationActive.TryGetValue(plan.TerritoryId, out var id) && id == plan.Id;
-        if (ImGui.Checkbox(Loc.T("Check my mitigations"), ref active))
+        if (Theme.Checkbox(Loc.T("Check my mitigations"), ref active))
         {
             if (active)
                 Config.MitigationActive[plan.TerritoryId] = plan.Id;
@@ -634,6 +711,6 @@ public sealed class MitigationTable
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Uses this plan in its fight: each skill of your column not used in time for its cast shows in Personal (Live and History). One plan per fight."));
+            Theme.Tooltip(Loc.T("Uses this plan in its fight: each skill of your column not used in time for its cast shows in Personal (Live and History). One plan per fight."));
     }
 }

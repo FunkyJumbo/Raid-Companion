@@ -72,6 +72,25 @@ public static class GearTooltip
                 StatLine(s.Param, s.Value);
         }
 
+        // A relic whose stats the player sets: the ones the set wants.
+        if (piece is not null && GearStats.IsCustomRelic(itemId))
+        {
+            ImGui.Separator();
+            var wanted = piece.Relic.Where(r => r.Value > 0)
+                              .OrderBy(r => System.Array.IndexOf(GearStats.Secondary, r.Key))
+                              .ToList();
+            if (wanted.Count == 0)
+            {
+                ImGui.TextColored(Theme.TextFaint, Loc.T("Relic stats: none chosen for this set (Edit)."));
+            }
+            else
+            {
+                ImGui.TextColored(Theme.Gold, Loc.T("Relic stats of the set"));
+                foreach (var (param, value) in wanted)
+                    StatLine(param, value);
+            }
+        }
+
         if (item.MateriaSlots > 0 || item.Overmeld)
         {
             ImGui.Separator();

@@ -34,6 +34,18 @@ public class ActionLogTests
     }
 
     [Fact]
+    public void TheTargetOfAnActionIsKept()
+    {
+        var log = new ActionLog();
+        log.OnActionUsed(3617, new ActionTarget("Striking Dummy", TargetKind.Other, 3));
+        log.OnActionUsed(3640); // no target known
+        var uses = log.Since(DateTime.UtcNow.AddSeconds(-1));
+
+        Assert.Equal(("Striking Dummy", TargetKind.Other, 3), (uses[0].Target, uses[0].TargetKind, uses[0].Targets));
+        Assert.Equal((string.Empty, TargetKind.None, 0), (uses[1].Target, uses[1].TargetKind, uses[1].Targets));
+    }
+
+    [Fact]
     public void ThePrepullStopsAtTheEndOfTheFightBefore()
     {
         var log = new ActionLog();

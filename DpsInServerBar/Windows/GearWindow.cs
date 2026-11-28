@@ -26,8 +26,12 @@ public sealed class GearWindow : Window
     private bool editing;
     private string link = string.Empty;
     private Task<List<GearSet>>? import;
+    private bool importRefused; // the link field shakes
     private string message = string.Empty;
     private bool messageIsError;
+
+    // The name typed to rename the set shown.
+    private string rename = string.Empty;
 
     // The item picker open: its search.
     private string pickSearch = string.Empty;
@@ -44,6 +48,8 @@ public sealed class GearWindow : Window
         Size = new Vector2(760, 560);
         SizeCondition = ImGuiCond.FirstUseEver;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(520, 320), MaximumSize = new Vector2(5000, 5000) };
+        // Always the size of its content: neither resized nor scrolled.
+        Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
         AllowBackgroundBlur = false;
         shot = new WindowShot(this);
         TitleBarButtons.Add(shot.TitleBarButton(() => Selected()?.Name ?? Loc.T("BiS gearsets")));
@@ -63,9 +69,27 @@ public sealed class GearWindow : Window
 
     public override void PreDraw()
     {
-        themeScope = Theme.Push();
+        themeScope = Theme.Push(WindowName);
+
+        // Exactly the size of the content (measured on the last frame), within the screen.
+        var scale = Dalamud.Interface.Utility.ImGuiHelpers.GlobalScale;
+        if (fitWidth > 0 && fitHeight > 0)
+        {
+            var screen = ImGui.GetMainViewport().Size / scale;
+            Size = new Vector2(Math.Clamp(fitWidth / scale, 520, Math.Max(520, screen.X)), Math.Clamp(fitHeight / scale, 320, Math.Max(320, screen.Y)));
+            SizeCondition = ImGuiCond.Always;
+        }
+
+        SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(520, 320), MaximumSize = new Vector2(5000, 5000) };
         shot.PreDraw();
     }
+
+    // The content's size, as wide as its tables and the bar's items, as tall as all of it (0 before the first frame).
+    private float fitWidth, fitHeight, contentRight;
+
+    // The last table's right edge, in the window.
+    private void FitWidth() =>
+        contentRight = Math.Max(contentRight, ImGui.GetItemRectMax().X - ImGui.GetWindowPos().X + ImGui.GetScrollX());
 
     public override void PostDraw()
     {
@@ -114,8 +138,19 @@ public sealed class GearWindow : Window
 
     public override void Draw()
     {
+        contentRight = 0;
+        DrawContent();
+        var style = ImGui.GetStyle();
+        fitWidth = contentRight + style.WindowPadding.X;
+        fitHeight = ImGui.GetCursorPosY() - style.ItemSpacing.Y + style.WindowPadding.Y;
+    }
+
+    private void DrawContent()
+    {
         shot.Step();
         Theme.BlurBehind();
+        Ambience.Draw();
+        Backdrop.Draw(Backdrop.Kind.Hive);
         if (job.Length == 0)
             job = GearCatalog.CurrentJob() is { Length: > 0 } current ? current : GearCatalog.Jobs.FirstOrDefault().Abbreviation ?? string.Empty;
 
@@ -181,7 +216,33 @@ public sealed class GearWindow : Window
         }
 
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            ImGui.SetTooltip(Loc.T("The set shown. Looking at a set does not track it: track it with the button at its right."));
+            Theme.Tooltip(Loc.T("The set shown. Looking at a set does not track it: track it with the button at its right. Right click: rename it."));
+
+        // Right click the list: rename the set shown.
+        if (selected is not null && ImGui.IsItemClicked(ImGuiMouseButton.Right))
+        {
+            rename = selected.Name;
+            ImGui.OpenPopup("##gearrename");
+        }
+
+        using (var popup = ImRaii.Popup("##gearrename"))
+        {
+            if ((bool)popup && selected is not null)
+            {
+                if (ImGui.IsWindowAppearing())
+                    ImGui.SetKeyboardFocusHere();
+                ImGui.SetNextItemWidth(Theme.Px(260));
+                var done = Theme.InputText("##rename", ref rename, 80, ImGuiInputTextFlags.EnterReturnsTrue);
+                ImGui.SameLine();
+                done |= Theme.GhostButton(Loc.T("Rename"));
+                if (done && rename.Trim().Length > 0)
+                {
+                    selected.Name = rename.Trim();
+                    Config.Save();
+                    ImGui.CloseCurrentPopup();
+                }
+            }
+        }
 
         // Track the set shown: its items lit in the game's windows.
         if (selected is not null)
@@ -219,9 +280,17 @@ public sealed class GearWindow : Window
             }
 
             ImGui.SameLine(0, Theme.Px(2));
-            using (ImRaii.Disabled(!ImGui.GetIO().KeyCtrl))
+            if (Theme.IconButton("gearshare", FontAwesomeIcon.ShareAlt, Loc.T("Share this set: copies a code to your clipboard, that Import reads")))
             {
-                if (Theme.IconButton("geardelete", FontAwesomeIcon.Trash, Loc.T("Delete this set (hold Ctrl)")))
+                ImGui.SetClipboardText(GearImport.ToCode(selected));
+                Toasts.Show(Loc.T("Copied to the clipboard"));
+                Say(Loc.F("Code of {0} copied: paste it to someone, who imports it.", selected.Name), false);
+            }
+
+            ImGui.SameLine(0, Theme.Px(2));
+            {
+                var deleteClicked = Theme.IconButton("geardelete", FontAwesomeIcon.Trash, Loc.T("Delete this set (hold Ctrl)"));
+                if (deleteClicked && ImGui.GetIO().KeyCtrl)
                 {
                     Config.GearSets.Remove(selected);
                     viewed.Remove(job);
@@ -232,8 +301,6 @@ public sealed class GearWindow : Window
                 }
             }
 
-            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                ImGui.SetTooltip(Loc.T("Delete this set (hold Ctrl)"));
 
             ImGui.SameLine();
             if (Theme.Chip(editing ? Loc.T("Done") : Loc.T("Edit"), editing))
@@ -245,53 +312,74 @@ public sealed class GearWindow : Window
 
         // Highlight, at the right.
         var label = Loc.T("Light up in game windows");
+        var checkWidth = ImGui.CalcTextSize(label).X + ImGui.GetFrameHeight() + ImGui.GetStyle().ItemInnerSpacing.X;
+        contentRight = Math.Max(contentRight, ImGui.GetItemRectMax().X - ImGui.GetWindowPos().X + Theme.Px(24) + checkWidth);
         var highlight = Config.GearHighlight;
         ImGui.SameLine(ImGui.GetWindowContentRegionMax().X - ImGui.CalcTextSize(label).X - ImGui.GetFrameHeight() - ImGui.GetStyle().ItemInnerSpacing.X);
-        if (ImGui.Checkbox(label, ref highlight))
+        if (Theme.Checkbox(label, ref highlight))
         {
             Config.GearHighlight = highlight;
             Config.Save();
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Lights up in the game's windows the set tracked for the job you play: its pieces, its food and the materia still to meld, in green in your inventory, armoury chest, saddlebag and retainer; in shops and the loot window, in gold the ones you still lack."));
+            Theme.Tooltip(Loc.T("Lights up in the game's windows the set tracked for the job you play: its pieces, its food and the materia still to meld, in green in your inventory, armoury chest, saddlebag and retainer; in shops and the loot window, in gold the ones you still lack."));
 
         // Import, and at its right the sets named in the game's item tooltip.
         var tipLabel = Loc.T("Sets in item tooltips");
         var tipWidth = ImGui.CalcTextSize(tipLabel).X + ImGui.GetFrameHeight() + ImGui.GetStyle().ItemInnerSpacing.X;
+        contentRight = Math.Max(contentRight, ImGui.GetCursorPosX() + Theme.Px(200) + Theme.Px(110) + tipWidth);
         ImGui.SetNextItemWidth(Math.Max(Theme.Px(200), ImGui.GetContentRegionAvail().X - Theme.Px(110) - tipWidth));
-        ImGui.InputTextWithHint("##gearlink", Loc.T("Link of xivgear.app or etro.gg"), ref link, 400);
+        if (importRefused)
+        {
+            importRefused = false;
+            Theme.Refuse("##gearlink");
+        }
+
+        Theme.InputTextWithHint("##gearlink", Loc.T("Link of xivgear.app or etro.gg, or a share code"), ref link, 8000);
         ImGui.SameLine();
         using (ImRaii.Disabled(import is not null))
         {
             if (Theme.GhostButton(import is null ? Loc.T("Import") : Loc.T("Importing...")))
             {
                 var text = link.Trim().Length > 0 ? link.Trim() : ImGui.GetClipboardText() ?? string.Empty;
-                if (GearImport.IsLink(text))
+                if (GearImport.IsCode(text))
+                {
+                    // A set shared from the plugin: read here, no internet.
+                    try
+                    {
+                        import = Task.FromResult(new List<GearSet> { GearImport.FromCode(text) });
+                    }
+                    catch (Exception e)
+                    {
+                        import = Task.FromException<List<GearSet>>(e);
+                    }
+                }
+                else if (GearImport.IsLink(text))
                 {
                     import = GearImport.FromLink(text);
                     Say(Loc.T("Importing..."), false);
                 }
                 else
                 {
-                    Say(Loc.T("Paste a link of xivgear.app or etro.gg in the field (or copy it, then click Import)."), true);
+                    Say(Loc.T("Paste a link of xivgear.app or etro.gg, or a set's share code, in the field (or copy it, then click Import)."), true);
                 }
             }
         }
 
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            ImGui.SetTooltip(Loc.T("Imports the sets of a link: a set or a whole sheet of xivgear.app (its best in slot lists too), or a gear set of etro.gg. The field empty, the link in your clipboard."));
+            Theme.Tooltip(Loc.T("Imports the sets of a link: a set or a whole sheet of xivgear.app (its best in slot lists too), a gear set of etro.gg, or a set's share code (Share button). The field empty, the one in your clipboard."));
 
         var tooltip = Config.GearTooltip;
         ImGui.SameLine(ImGui.GetWindowContentRegionMax().X - tipWidth);
-        if (ImGui.Checkbox(tipLabel, ref tooltip))
+        if (Theme.Checkbox(tipLabel, ref tooltip))
         {
             Config.GearTooltip = tooltip;
             Config.Save();
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("In the game's item tooltip, under the item's name: the sets holding it (every job), and how many of it when more than one."));
+            Theme.Tooltip(Loc.T("In the game's item tooltip, under the item's name: the sets holding it (every job), and how many of it when more than one."));
     }
 
     private string UniqueName(string name)
@@ -314,6 +402,7 @@ public sealed class GearWindow : Window
         {
             var error = done.Exception?.GetBaseException();
             Say(Loc.F("Import failed: {0}", error?.Message ?? "?"), true);
+            importRefused = true;
             Plugin.Log.Warning(error!, "Gear set import failed");
             return;
         }
@@ -337,6 +426,100 @@ public sealed class GearWindow : Window
     }
 
     // ---- Tracker: what you own of the set.
+
+    // ---- The tracker's animations: the set's gauge, a piece dropping in when obtained, a row lifting under the mouse.
+
+    private float gaugeShown = -1f;
+    private string? gaugeSet;
+    private string? ownedSet;
+    private readonly Dictionary<GearSlot, bool> ownedBefore = new();
+    private readonly Dictionary<GearSlot, float> obtainedAt = new();
+    private readonly Dictionary<GearSlot, float> lifted = new();
+    private readonly Sparks dropSparks = new();
+
+    // The set's progress (pieces and materia): a gauge gliding to it, a mark at each quarter lit once reached.
+    private void DrawProgressGauge(GearSet set, int total, int done)
+    {
+        if (total <= 0)
+            return;
+        var target = done / (float)total;
+        if (gaugeSet != set.Id || !Fx.Enabled || gaugeShown < 0)
+        {
+            gaugeSet = set.Id;
+            gaugeShown = Fx.Enabled ? 0 : target;
+        }
+
+        gaugeShown += (target - gaugeShown) * Math.Min(1f, Fx.Delta * 3f);
+        var width = Math.Min(ImGui.GetContentRegionAvail().X, Theme.Px(420));
+        var height = Theme.Px(8);
+        var pos = ImGui.GetCursorScreenPos() + new Vector2(0, Theme.Px(4));
+        var dl = ImGui.GetWindowDrawList();
+        dl.AddRectFilled(pos, pos + new Vector2(width, height), Theme.U32(Theme.Surface), height / 2);
+        if (gaugeShown > 0.001f)
+            dl.AddRectFilled(pos, pos + new Vector2(width * gaugeShown, height), Theme.U32(target >= 1 ? Theme.Good : Theme.Gold, 0.9f), height / 2);
+        foreach (var mark in new[] { 0.25f, 0.5f, 0.75f, 1f })
+        {
+            var at = pos + new Vector2(width * mark, height / 2);
+            var reached = gaugeShown >= mark - 0.002f;
+            if (reached)
+                Fx.Glow(dl, at, Theme.Px(2.6f), target >= 1 ? Theme.Good : Theme.GoldBright, 0.9f);
+            else
+                dl.AddCircleFilled(at, Theme.Px(2.6f), Theme.U32(Theme.Line), 12);
+        }
+
+        var label = $"{target:0%}";
+        dl.AddText(pos + new Vector2(width + Theme.Px(8), (height - ImGui.GetTextLineHeight()) / 2), Theme.U32(Theme.TextMuted), label);
+        ImGui.Dummy(new Vector2(width + Theme.Px(8) + ImGui.CalcTextSize(label).X, height + Theme.Px(8)));
+    }
+
+    // The piece's icon dropping into its place, a flash and a few sparks as it lands.
+    private void DrawDrop(Vector2 cell, uint icon, float age)
+    {
+        var size = ImGui.GetFrameHeight();
+        var dl = ImGui.GetWindowDrawList();
+        var fall = Fx.EaseOut(age / 0.35f);
+        var at = cell - new Vector2(0, (1 - fall) * size * 1.6f);
+        if (age < 0.35f && icon != 0
+            && Plugin.TextureProvider.GetFromGameIcon(new Dalamud.Interface.Textures.GameIconLookup(icon)).GetWrapOrDefault() is { } wrap)
+            dl.AddImage(wrap.Handle, at, at + new Vector2(size), Vector2.Zero, Vector2.One, Theme.U32(Vector4.One, 0.9f));
+        if (age >= 0.35f)
+        {
+            var flash = 1 - (age - 0.35f) / 0.65f;
+            dl.AddRect(cell - new Vector2(Theme.Px(2)), cell + new Vector2(size + Theme.Px(2)), Theme.U32(Theme.GoldBright, flash), Theme.Px(4),
+                       ImDrawFlags.None, Theme.Px(2));
+            if (!dropSparks.Any && age < 0.4f)
+                dropSparks.Burst(cell + new Vector2(size / 2), Theme.GoldBright, 14, 0.6f, 0.6f);
+        }
+
+        dropSparks.Draw(dl);
+    }
+
+    // The row under the mouse lifts a little: a light rim and a shadow under it.
+    private unsafe void DrawLift(GearSlot slot, Vector2 rowStart)
+    {
+        var table = ImGuiP.GetCurrentTable();
+        if (table.Handle == null)
+            return;
+        var padding = ImGui.GetStyle().CellPadding;
+        var min = new Vector2(table.OuterRect.Min.X, rowStart.Y - padding.Y);
+        var max = new Vector2(table.OuterRect.Max.X, rowStart.Y + ImGui.GetFrameHeight() + padding.Y);
+        var mouse = ImGui.GetMousePos();
+        var over = ImGui.IsWindowHovered() && mouse.X >= min.X && mouse.X < max.X && mouse.Y >= min.Y && mouse.Y < max.Y;
+        var k = lifted.GetValueOrDefault(slot);
+        k = Fx.Enabled ? Math.Clamp(k + (over ? 1 : -1) * Fx.Delta * 8f, 0f, 1f) : 0f;
+        lifted[slot] = k;
+        if (k <= 0)
+            return;
+        var dl = ImGui.GetWindowDrawList();
+        var shadow = Theme.Px(6) * k;
+        uint dark = Theme.U32(new Vector4(0, 0, 0, 1), 0.35f * k), none = Theme.U32(new Vector4(0, 0, 0, 1), 0f);
+        dl.AddRectFilledMultiColor(new Vector2(min.X + Theme.Px(3), max.Y), new Vector2(max.X - Theme.Px(3), max.Y + shadow), dark, dark, none, none);
+        dl.AddRect(min, max, Theme.U32(Theme.Gold, 0.4f * k), Theme.Px(4), ImDrawFlags.None, Theme.Px(1));
+        dl.AddLine(min + new Vector2(Theme.Px(4), 0), new Vector2(max.X - Theme.Px(4), min.Y), Theme.U32(Theme.GoldBright, 0.5f * k), Theme.Px(1));
+    }
+
+    // Where the panel behind the pieces goes (relative to the window), from the last frame.
+    private (Vector2 Min, Vector2 Max)? piecesBox;
 
     private void DrawTracker(GearSet set)
     {
@@ -371,9 +554,38 @@ public sealed class GearWindow : Window
 
         Theme.HelpMarker(Loc.T("Read from your character: equipped, armoury chest, inventory and saddlebag (once opened). Retainers are not read."));
 
+        DrawProgressGauge(set, slots.Count + planned, have + melded);
+
+        // Pieces just obtained (not owned on the last look at this set): they drop into their row.
+        if (ownedSet != set.Id)
+        {
+            ownedSet = set.Id;
+            ownedBefore.Clear();
+            foreach (var s in slots)
+                ownedBefore[s] = owned.GetValueOrDefault(s) is not null;
+        }
+
+        foreach (var s in slots)
+        {
+            var now = owned.GetValueOrDefault(s) is not null;
+            if (now && ownedBefore.TryGetValue(s, out var before) && !before && Fx.Enabled)
+                obtainedAt[s] = Fx.Now;
+            ownedBefore[s] = now;
+        }
+
         var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | Theme.FitTable | ImGuiTableFlags.PadOuterX;
         var columns = StatColumns(set);
-        using (var table = ImRaii.Table("##geartracker", 5 + columns.Count, flags))
+
+        // The pieces, stats and note in a panel like the list of the mitigation plans (the child background of the theme), drawn
+        // behind them where they were last frame.
+        var boxPad = Theme.Px(6);
+        ImGui.Dummy(new Vector2(0, boxPad / 2));
+        var window = ImGui.GetWindowPos();
+        if (piecesBox is { } box)
+            ImGui.GetWindowDrawList().AddRectFilled(window + box.Min, window + box.Max, ImGui.GetColorU32(ImGuiCol.ChildBg),
+                                                    ImGui.GetStyle().ChildRounding);
+        var piecesTop = ImGui.GetCursorScreenPos().Y;
+        using (var table = Theme.Table("##geartracker", 5 + columns.Count, flags))
         {
             if (table)
             {
@@ -392,13 +604,20 @@ public sealed class GearWindow : Window
                     var item = GearCatalog.Item(piece.ItemId);
                     ImGui.TableNextRow();
                     Theme.RowHover();
+                    var rowStart = ImGui.GetCursorScreenPos();
+                    var sinceObtained = obtainedAt.TryGetValue(slot, out var obtained) ? Fx.Now - obtained : 100f;
+                    if (sinceObtained < 1f)
+                        ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg1, Theme.U32(Theme.Good, 0.35f * (1 - sinceObtained)));
 
                     ImGui.TableNextColumn();
                     ImGui.AlignTextToFramePadding();
                     ImGui.TextColored(Theme.TextMuted, GearCatalog.SlotName(slot));
 
                     ImGui.TableNextColumn();
+                    var itemCell = ImGui.GetCursorScreenPos();
                     DrawItem(piece.ItemId, piece, copy);
+                    if (sinceObtained < 1f)
+                        DrawDrop(itemCell, item?.Icon ?? 0, sinceObtained);
 
                     ImGui.TableNextColumn();
                     ImGui.AlignTextToFramePadding();
@@ -413,7 +632,7 @@ public sealed class GearWindow : Window
                         // Owned but not worn: in orange, to put on.
                         ImGui.TextColored(copy.Place == GearPlace.Equipped ? Theme.Good : Theme.Warn, PlaceName(copy.Place));
                         if (copy.Place != GearPlace.Equipped && ImGui.IsItemHovered())
-                            ImGui.SetTooltip(Loc.T("You have it, but it is not equipped."));
+                            Theme.Tooltip(Loc.T("You have it, but it is not equipped."));
                     }
 
                     if (copy is not null && relics.TryGetValue(slot, out var relic))
@@ -422,6 +641,7 @@ public sealed class GearWindow : Window
                     ImGui.TableNextColumn();
                     DrawMateria(piece, copy);
                     DrawStatCells(piece, columns);
+                    DrawLift(slot, rowStart);
                 }
 
                 if (set.Food != 0)
@@ -446,6 +666,8 @@ public sealed class GearWindow : Window
             }
         }
 
+        FitWidth();
+
         DrawStats(set);
 
         if (set.Note.Length > 0)
@@ -454,6 +676,13 @@ public sealed class GearWindow : Window
             ImGui.TextColored(Theme.Gold, Loc.T("Note"));
             Theme.Hint(set.Note);
         }
+
+        // The panel's place for the next frame: the pieces, the stats and the note.
+        var left = window.X + ImGui.GetWindowContentRegionMin().X - boxPad;
+        var right = window.X + ImGui.GetWindowContentRegionMax().X + boxPad;
+        var bottom = ImGui.GetCursorScreenPos().Y - ImGui.GetStyle().ItemSpacing.Y + boxPad;
+        piecesBox = (new Vector2(left, piecesTop - boxPad) - window, new Vector2(right, bottom) - window);
+        ImGui.Dummy(new Vector2(0, boxPad / 2));
 
         if (set.Source.Length > 0)
         {
@@ -464,7 +693,7 @@ public sealed class GearWindow : Window
 
     // The set's stats at level 100: each stat's total, from the gear, the materia and the food, what the meld caps
     // cut, and the global cooldown at its speed.
-    private static void DrawStats(GearSet set)
+    private void DrawStats(GearSet set)
     {
         if (set.Pieces.Values.All(p => p.ItemId == 0))
             return;
@@ -478,7 +707,7 @@ public sealed class GearWindow : Window
                               .Where(t => t.Gear + t.Materia + t.Food > 0 || t.Param == main)
                               .ToList();
         var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | Theme.FitTable | ImGuiTableFlags.PadOuterX;
-        using (var table = ImRaii.Table("##gearstats", 7, flags))
+        using (var table = Theme.Table("##gearstats", 7, flags))
         {
             if (table)
             {
@@ -512,6 +741,8 @@ public sealed class GearWindow : Window
                 }
             }
         }
+
+        FitWidth();
 
         var speedStat = GearStats.UsesSpellSpeed(set.Job) ? GearStats.SpellSpeed : GearStats.SkillSpeed;
         var speed = GearStats.Totals(set).First(t => t.Param == speedStat).Total;
@@ -565,11 +796,11 @@ public sealed class GearWindow : Window
                 ImGui.SameLine(0, Theme.Px(3));
                 ImGui.TextColored(Theme.Bad, $"-{s.Wasted}");
                 if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip(Loc.F("({0} over the cap)", s.Wasted));
+                    Theme.Tooltip(Loc.F("({0} over the cap)", s.Wasted));
             }
 
             if (ImGui.IsItemHovered() && s.Wasted == 0)
-                ImGui.SetTooltip(GearStats.Name(param));
+                Theme.Tooltip(GearStats.Name(param));
         }
     }
 
@@ -659,7 +890,7 @@ public sealed class GearWindow : Window
         if (Theme.GhostButton($"{label}##relic"))
             ImGui.OpenPopup("##relicstats");
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("The secondary stats chosen for this relic. The tracker counts it once your relic has them."));
+            Theme.Tooltip(Loc.T("The secondary stats chosen for this relic. The tracker counts it once your relic has them."));
 
         using var popup = ImRaii.Popup("##relicstats");
         if (!popup)
@@ -759,7 +990,7 @@ public sealed class GearWindow : Window
         var changed = false;
         var name = set.Name;
         ImGui.SetNextItemWidth(Theme.Px(300));
-        if (ImGui.InputText(Loc.T("Name"), ref name, 80))
+        if (Theme.InputText(Loc.T("Name"), ref name, 80))
         {
             set.Name = name;
             changed = true;
@@ -775,11 +1006,11 @@ public sealed class GearWindow : Window
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("The item lists stop at this item level (0: every item)."));
+            Theme.Tooltip(Loc.T("The item lists stop at this item level (0: every item)."));
 
         var flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | Theme.FitTable | ImGuiTableFlags.PadOuterX;
         var columns = StatColumns(set);
-        using (var table = ImRaii.Table("##geareditor", 4 + columns.Count, flags))
+        using (var table = Theme.Table("##geareditor", 4 + columns.Count, flags))
         {
             if (table)
             {
@@ -822,7 +1053,7 @@ public sealed class GearWindow : Window
                     ImGui.TableNextColumn();
                     var note = piece.Note;
                     ImGui.SetNextItemWidth(Theme.Px(190));
-                    if (ImGui.InputTextWithHint("##note", Loc.T("Note"), ref note, 200))
+                    if (Theme.InputTextWithHint("##note", Loc.T("Note"), ref note, 200))
                     {
                         piece.Note = note;
                         changed = true;
@@ -846,7 +1077,7 @@ public sealed class GearWindow : Window
                 ImGui.TableNextColumn();
                 var foodNote = set.FoodNote;
                 ImGui.SetNextItemWidth(Theme.Px(190));
-                if (ImGui.InputTextWithHint("##foodnote", Loc.T("Note"), ref foodNote, 200))
+                if (Theme.InputTextWithHint("##foodnote", Loc.T("Note"), ref foodNote, 200))
                 {
                     set.FoodNote = foodNote;
                     changed = true;
@@ -854,12 +1085,14 @@ public sealed class GearWindow : Window
             }
         }
 
+        FitWidth();
+
         DrawStats(set);
 
         ImGui.Spacing();
         ImGui.TextColored(Theme.Gold, Loc.T("Note"));
         var general = set.Note;
-        if (ImGui.InputTextMultiline("##gearnote", ref general, 2000, new Vector2(-1, Theme.Px(80))))
+        if (ImGui.InputTextMultiline("##gearnote", ref general, 2000, new Vector2(Math.Max(Theme.Px(300), contentRight - ImGui.GetCursorPosX()), Theme.Px(80))))
         {
             set.Note = general;
             changed = true;
@@ -905,7 +1138,7 @@ public sealed class GearWindow : Window
                 if (piece.Materia[i] != 0)
                     GearTooltip.Show(piece.Materia[i]);
                 else
-                    ImGui.SetTooltip(overmeld ? Loc.F("{0} (overmeld)", Loc.T("Empty")) : Loc.T("Empty"));
+                    Theme.Tooltip(overmeld ? Loc.F("{0} (overmeld)", Loc.T("Empty")) : Loc.T("Empty"));
             }
         }
 
@@ -970,7 +1203,7 @@ public sealed class GearWindow : Window
         if (ImGui.IsWindowAppearing())
             ImGui.SetKeyboardFocusHere();
         ImGui.SetNextItemWidth(Theme.Px(320));
-        ImGui.InputTextWithHint("##search", Loc.T("Search"), ref pickSearch, 80);
+        Theme.InputTextWithHint("##search", Loc.T("Search"), ref pickSearch, 80);
 
         var shown = items.Where(i => (maxItemLevel <= 0 || i.ItemLevel <= maxItemLevel)
                                      && (pickSearch.Length == 0 || i.Name.Contains(pickSearch, StringComparison.OrdinalIgnoreCase)))

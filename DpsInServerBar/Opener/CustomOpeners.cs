@@ -20,8 +20,6 @@ public sealed class CustomOpenerStep
 
     /// <summary>Seconds before the pull, null after it.</summary>
     public double? Prepull { get; set; }
-
-    public CustomOpenerStep Clone() => new() { ActionIds = [.. ActionIds], Kind = Kind, Prepull = Prepull };
 }
 
 /// <summary>An opener made in the editor (new, copied from a built-in one, or imported from a code), saved in the settings.</summary>

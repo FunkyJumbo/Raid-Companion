@@ -76,6 +76,32 @@ Game data (actions, bosses, debuffs) stays in your game client's language.
 
 `/raidcompanion` opens the main window, with three tabs: **Live**, **History** and **Progression**.
 
+The first time, a **welcome window** goes through what the plugin does, a page per part of it
+(`/raidcompanion welcome` shows it again); its points light up under the mouse, and on its last page the motes gather
+into the plugin's name. The plugin is animated: windows fade in and their sections appear one after the other, a light
+follows the mouse on the buttons and a ripple leaves the point clicked, the selected tab glides, the cards' figures
+roll, a new theme sweeps across the windows, tooltips unroll, a check is traced in its box, a slider leaves a trail, a
+text field's underline spreads when you click in it, a refused entry shakes in red, a search makes the rows left out
+slide away, a scrollbar lights up while you scroll, small messages slide in at the bottom right of the screen
+("Copied", a new best pull), and faint particles after the theme float behind the windows (snow for Frost, embers for
+Crimson, fireflies for Emerald...), behind the tables, graphs and lists, with fine rain or snow when it rains or snows
+where you are; in Live and the compact meter, the damage bars glide to their values, a light passes on your own bar, which flashes
+and throws sparks when you pass another player, a player who dies shakes with a red ring and their bar
+goes grey and breaks until they are raised (a light then rises up their row as it gets its color back). The compact
+meter's frame breathes in combat, its rows unfold when a pull starts, and at the end it freezes like glass while the
+pull's summary slides up. In Live, a ring spreads from the timer when a pull
+starts, a banner crosses the phase of an
+ultimate when it changes (its start dropping as a mark on the graph), and a ring fills to your GCD uptime. In
+History, an ultimate's pull fills its phases up to the one reached (in Progression, the best of the pulls chosen), your
+best pull on each fight has a twinkling star; a wall of tiles lays out every pull of the fight one after the other (red the wipes, brighter the further they got,
+green the kills), the progression curve traces itself, then a twinkling star marks the furthest pull, a ring leaving it now and then. In a mitigation plan
+following a pull, a cast where your mitigation was missed cracks, a pull with the plan held sends a green wave down it, and a row moved in the editor lights up in
+its new place; the opener practice makes the next action breathe, shakes the expected one with a red cross on a wrong
+press, chains the actions done, and an opener done without a mistake sends a light around its window, which flashes
+(and fades out when it closes by itself); a BiS set shows a gauge of its progress, a piece obtained drops into its
+row, and the row under the mouse lifts.
+The animations, the theme's ambience and the game's weather can each be turned off in Settings > Appearance.
+
 ### Live
 
 See Live as a very detailed DPS meter. You can keep it open during the fight, but it takes room on screen: it is
@@ -181,8 +207,8 @@ can compare your damage stats between two pulls. In the settings you choose the 
 <details>
 <summary><b>What's in History</b></summary>
 
-- **Pull list** — result (Kill / Wipe), boss HP left (of the phase reached in an ultimate), duration, job, DPS, rDPS, pDPS and rank. Filter by kind of content (several at
-  once: ultimate, savage, extreme, criterion, raids, trials, dungeons, other) and by instance. The list of instances
+- **Pull list** — result (Kill / Wipe), boss HP left (of the phase reached in an ultimate), duration, job, DPS, rDPS, pDPS and rank. Filter by kind of content (one at a
+  time, or All: ultimate, savage, extreme, criterion, raids, trials, dungeons, other) and by instance. The list of instances
   follows the same order, the latest released first in each kind; type in it to search a fight, and its filter button
   chooses the expansions shown. Drag the grip under the list to make it taller
   (double-click to reset). Tick **vs** on another pull to **compare** it with the selected one.
@@ -196,7 +222,7 @@ can compare your damage stats between two pulls. In the settings you choose the 
   DoT uptime (each time a DoT stayed off the boss), overheal (per heal action and HoT), tank swaps and your mitigation.
   Every section of Live and History folds with a click on the **dash** before its title (a **plus** shows it again; the graph included).
   History also shows your **rotation**: a timeline of your GCDs and oGCDs (and potions) in the pull, the 30 s before it included
-  (shaded), scrolled with the wheel and zoomed with Ctrl + wheel; hover an icon for its action and time.
+  (shaded), scrolled with the wheel and zoomed with Ctrl + wheel; hover an icon for its action, time and target (who or what it landed on, and how many more).
   History also shows the **DPS lost to Damage Down and to Weakness / Brink of Death** after a raise (*experimental*, estimated from
   your damage while each debuff was on, with each one listed).
 - **Mitigation** — for each party member, every mitigation and defensive buff used, with the time of each use
@@ -302,7 +328,7 @@ ultimate these lines replace the pull summary.
 Who uses which mitigation on each cast of a fight, as raid groups keep it in a spreadsheet: one row per cast, one
 column per role (MT, OT, H1, H2, M1, M2, R1, R2, or jobs), the skills of each cell shown by their icon (up to three
 side by side, centered). Open it with **Mitigation plans** in Live: the list of the plans of every fight, by name, with a
-search (a fight searched shows all its plans). **Show** opens a plan in a compact pop-up, like the compact meter (no title bar,
+search (a fight searched shows all its plans). **Show** opens a plan in a compact pop-up, like the compact meter (read only, no title bar,
 dragged by its background, sized to the plan; at the right of its tabs, buttons for your position only or the whole group,
 edit and close; right click for your column, **your position only** (its column and
 the casts where it has something), the check of your mitigations, its background, share and edit), **Edit** opens it in the editor, the **copy** button duplicates it (named "... (1)").
@@ -346,9 +372,12 @@ you play.
 
 - **Sets**: pick the job, then a set among its sets (several per job: a savage tier, an ultimate...). Looking at a set
   does not track it: the **target** button at its right tracks the set shown (marked "tracked" in the list), the one
-  lit in the game's windows. **+** makes one, the copy button duplicates it, the bin deletes it (hold Ctrl).
-- **Import**: paste a link of [xivgear.app](https://xivgear.app) (a set, a whole sheet, or one of its best in slot
-  lists) or [etro.gg](https://etro.gg) and click **Import**: every set of the link is added.
+  lit in the game's windows. **+** makes one, the copy button duplicates it, the bin deletes it (hold Ctrl), a right
+  click on the list renames it.
+- **Share and import**: the **share** button copies a code of the set shown to your clipboard; whoever pastes it and
+  clicks **Import** gets the set (read in the plugin, no internet). **Import** also reads a link of
+  [xivgear.app](https://xivgear.app) (a set, a whole sheet, or one of its best in slot lists) or
+  [etro.gg](https://etro.gg): every set of the link is added.
 - **Tracker**: each piece of the set with its item level, whether you have it (equipped, armoury chest, inventory or
   saddlebag) or it is missing, and its materia, lit once melded in the right slot of your copy; the pieces owned, the
   materia melded and the average item level above it, the food and the notes below it.
@@ -366,6 +395,8 @@ you play.
 - **Light up in game windows**: the set tracked for the job you play lit in the game's own windows: its pieces, its
   food and the materia still to meld, in green in your inventory, armoury chest, saddlebag and retainer (the slot's
   real item is read, so a look-alike stays unlit); in shops and the loot window, in gold what you still lack.
+  In the materia melding window, the pieces with materia still to meld, and for the piece selected the materia it
+  still needs.
 - **Sets in item tooltips**: the game's item tooltip names, under the item's name, the sets holding it (every job), with
   how many of it when more than one (materia).
 
@@ -439,6 +470,7 @@ The other player pastes it in their editor and presses **Import**.
 | `/raidcompanion opener full` | Open / close the opener practice in its full window |
 | `/raidcompanion opener edit` | Open the opener editor: make, change and share your openers |
 | `/raidcompanion bis` | Open / close the BiS gearsets |
+| `/raidcompanion welcome` | Show the welcome window again |
 
 `/rcomp` is a shorter alias (e.g. `/rcomp preset 2`, handy in a macro). The old `/dpsbar` still works, so existing
 macros keep working.
@@ -457,7 +489,7 @@ macros keep working.
 | **Display** | **Language** (English, French, German or Al Bhed; Auto follows Dalamud's language), compact meter (columns, header, background opacity), the rolling window of the DPS graphs, the **lines of Personal**, **cards shown** in Live and History (GCD uptime card off by default), Limit Break in party DPS, **hide player names** (made-up names in every window, for screenshots) |
 | **DPS in server bar** | Presets (renamable, switchable with `/raidcompanion preset N`), metric, number format (`12345` / `12,345` / `12.3k`), bar elements and their order, separator, **bar preview** (placeholder values for 10 s), auto-hide, colors |
 | **Chat summary** | Pull summary on/off, in dungeons, at the end of each ultimate phase, each party death as it happens (optionally with the overkill), values shown, comparison with your best kill, **preview in chat** |
-| **Appearance** | Theme presets (Midnight, Crimson, Emerald, Aether, Slate, Frost), saved custom themes (renamable), themes shared with a code, background opacity, **glass effect** on any theme (frosted see-through windows with the game blurred behind them, blur strength adjustable; Midnight with the glass effect for a new install), custom colors, preview |
+| **Appearance** | Theme presets (Midnight, Crimson, Emerald, Aether, Slate, Frost), saved custom themes (renamable), themes shared with a code, background opacity, **glass effect** on any theme (frosted see-through windows with the game blurred behind them, blur strength adjustable, a dark outline around the grey text so it stays readable; Midnight with the glass effect for a new install), **animations** on or off, the theme's ambience and the game's weather, faint moving backgrounds behind some views (a glow in a corner in Live, a corridor of grids in Progression, a hive in Mitigation plans, BiS gearsets, the opener editor and practice (compact too), a grid of hexagons fading from the right side in Settings), the welcome window again, custom colors, preview |
 | **Pulls history** | Record only in duties, **kinds of content recorded** (ultimates, savage, extremes, criterion, raids, trials, dungeons, other), minimum pull length, history size, tankbuster vulnerabilities ignored |
 | **DPS check** (WIP) | Boss HP, enrage time and minimum party DPS per fight; ultimate phases with each phase's HP, enrage and required DPS; other zones / encounters |
 
@@ -482,7 +514,7 @@ during combat.
 
 - Recorded pulls are saved in the `pulls` folder (one file per pull), in the plugin's configuration folder
   (`%AppData%\XIVLauncher\pluginConfigs\DpsInServerBar\`). They include your party members' names. Choose what is
-  recorded in Settings > Pulls history; delete a pull with its bin icon, or everything with **Clear all** (hold Ctrl).
+  recorded in Settings > Pulls history; delete a pull with its bin icon (hold Ctrl), or everything with **Clear all** (hold Ctrl).
 - Screenshots go to `Pictures\Raid Companion`, only when you ask for one.
 - Settings are kept in the plugin's configuration file, like any other Dalamud plugin setting.
 

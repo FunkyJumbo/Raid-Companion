@@ -50,6 +50,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly OpenerEditorWindow openerEditorWindow;
     private readonly MitigationWindow mitigationWindow;
     private readonly GearWindow gearWindow;
+    private readonly WelcomeWindow welcomeWindow;
     private readonly Gear.GearHighlighter gearHighlighter;
     private readonly Gear.GearItemDetail gearItemDetail;
     private readonly UI.AlBhedChat alBhedChat;
@@ -90,7 +91,7 @@ public sealed class Plugin : IDalamudPlugin
         native.LocalActionUsed += Uptime.OnActionUsed;
         Combos = new ComboTracker(ObjectTable, JobGauges, combat, DataManager);
         native.LocalActionUsed += Combos.OnActionUsed;
-        native.LocalActionUsed += Actions.OnActionUsed;
+        native.LocalActionOn += Actions.OnActionUsed;
         native.LocalEffect += (type, id) =>
         {
             if (type == 2) // an item (a potion...)
@@ -124,6 +125,8 @@ public sealed class Plugin : IDalamudPlugin
         windowSystem.AddWindow(openerCompactWindow);
         gearWindow = new GearWindow(this);
         windowSystem.AddWindow(gearWindow);
+        welcomeWindow = new WelcomeWindow(this) { IsOpen = !Configuration.WelcomeShown };
+        windowSystem.AddWindow(welcomeWindow);
         // The set tracked for the job you play is lit in the game's windows; every set is named in the item tooltip.
         gearHighlighter = new Gear.GearHighlighter(
             GameGui,
@@ -141,6 +144,7 @@ public sealed class Plugin : IDalamudPlugin
         CommandManager.AddHandler(LegacyCommand, new CommandInfo(OnCommand) { ShowInHelp = false });
 
         PluginInterface.UiBuilder.Draw += windowSystem.Draw;
+        PluginInterface.UiBuilder.Draw += UI.Toasts.Draw;
         PluginInterface.UiBuilder.OpenMainUi += ToggleMainUi;
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
         PluginInterface.LanguageChanged += OnLanguageChanged;
@@ -182,8 +186,10 @@ public sealed class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        UI.RaidScene.Unload();
         Framework.Update -= OnFrameworkUpdate;
         PluginInterface.UiBuilder.Draw -= windowSystem.Draw;
+        PluginInterface.UiBuilder.Draw -= UI.Toasts.Draw;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleMainUi;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
         PluginInterface.LanguageChanged -= OnLanguageChanged;
@@ -297,6 +303,11 @@ public sealed class Plugin : IDalamudPlugin
     public void ShowPull(Guid pullId) => mainWindow.ShowPull(pullId);
 
     public bool GearOpen => gearWindow.IsOpen;
+
+    /// <summary>Opens the welcome window on its first page.</summary>
+    public void ShowWelcome() => welcomeWindow.Show();
+
+    public void OpenSettings() => configWindow.IsOpen = true;
 
     public void ToggleGear()
     {
@@ -482,6 +493,10 @@ public sealed class Plugin : IDalamudPlugin
             case "bis":
             case "gear":
                 ToggleGear();
+                break;
+            case "welcome":
+            case "intro":
+                ShowWelcome();
                 break;
             case "opener edit":
             case "opener editor":

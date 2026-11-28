@@ -31,8 +31,6 @@ public static class ActionNames
         return byName.GetValueOrDefault(Normalize(englishName));
     }
 
-    public static bool Is(uint id, string englishName) => Of(id) == Normalize(englishName);
-
     public static string Normalize(string name) => name.Replace('’', '\'').Trim().ToLowerInvariant();
 
     private static Dictionary<string, uint> Load()

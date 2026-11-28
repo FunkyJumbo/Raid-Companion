@@ -83,7 +83,7 @@ public sealed class OpenerEditorWindow : Window
 
     public override void PreDraw()
     {
-        themeScope = Theme.Push();
+        themeScope = Theme.Push(WindowName);
         shot.PreDraw();
     }
 
@@ -97,6 +97,8 @@ public sealed class OpenerEditorWindow : Window
     {
         shot.Step();
         Theme.BlurBehind();
+        Ambience.Draw();
+        Backdrop.Draw(Backdrop.Kind.Hive);
         FollowPull();
         DrawTopBar();
         Theme.Rule();
@@ -156,7 +158,7 @@ public sealed class OpenerEditorWindow : Window
         // Import: paste a code in the field (or straight from the clipboard).
         ImGui.SameLine(0, Theme.Px(16));
         ImGui.SetNextItemWidth(Theme.Px(220));
-        ImGui.InputTextWithHint("##importcode", Loc.T("Paste an opener code"), ref importCode, 8192);
+        Theme.InputTextWithHint("##importcode", Loc.T("Paste an opener code"), ref importCode, 8192);
         ImGui.SameLine();
         if (Theme.GhostButton(Loc.T("Import")))
         {
@@ -171,11 +173,12 @@ public sealed class OpenerEditorWindow : Window
             else
             {
                 Say(error, isError: true);
+                Theme.Refuse("##importcode");
             }
         }
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(Loc.T("Imports the code pasted in the field, or the one in your clipboard when the field is empty."));
+            Theme.Tooltip(Loc.T("Imports the code pasted in the field, or the one in your clipboard when the field is empty."));
 
         if (message.Length > 0)
         {
@@ -282,7 +285,7 @@ public sealed class OpenerEditorWindow : Window
         var config = plugin.Configuration;
         var name = opener.Name;
         ImGui.SetNextItemWidth(Theme.Px(260));
-        if (ImGui.InputText(Loc.T("Name"), ref name, 64))
+        if (Theme.InputText(Loc.T("Name"), ref name, 64))
         {
             opener.Name = name;
             Changed(opener, save: false);
@@ -295,6 +298,7 @@ public sealed class OpenerEditorWindow : Window
         if (Theme.PrimaryButton(Loc.T("Copy share code")))
         {
             ImGui.SetClipboardText(CustomOpeners.Export(opener));
+            Toasts.Show(Loc.T("Copied to the clipboard"));
             Say(Loc.T("Code copied: paste it anywhere, the other player imports it in their editor."));
         }
 
@@ -309,10 +313,11 @@ public sealed class OpenerEditorWindow : Window
         }
 
         ImGui.SameLine();
-        var ctrl = ImGui.GetIO().KeyCtrl;
-        using (ImRaii.Disabled(!ctrl))
         {
-            if (Theme.GhostButton(Loc.T("Delete")))
+            var deleteClicked = Theme.GhostButton(Loc.T("Delete"));
+            if (ImGui.IsItemHovered())
+                Theme.Tooltip(Loc.T("Hold Ctrl to delete this opener."));
+            if (deleteClicked && ImGui.GetIO().KeyCtrl)
             {
                 config.CustomOpeners.Remove(opener);
                 selectedId = string.Empty;
@@ -323,8 +328,6 @@ public sealed class OpenerEditorWindow : Window
             }
         }
 
-        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            ImGui.SetTooltip(Loc.T("Hold Ctrl to delete this opener."));
 
         Theme.SectionHeader(Loc.F("Steps ({0})", opener.Steps.Count));
         DrawRecording(opener);
@@ -348,7 +351,7 @@ public sealed class OpenerEditorWindow : Window
                 SetRecording(true);
             if (ImGui.IsItemHovered())
             {
-                ImGui.SetTooltip(Loc.T("Play your opener on a striking dummy: each action you use is added at the end, GCD or oGCD read from the game. Actions used before the pull get their time before it. Fix the details by hand afterwards."));
+                Theme.Tooltip(Loc.T("Play your opener on a striking dummy: each action you use is added at the end, GCD or oGCD read from the game. Actions used before the pull get their time before it. Fix the details by hand afterwards."));
             }
 
             if (opener.Steps.Count > 0)
@@ -364,7 +367,7 @@ public sealed class OpenerEditorWindow : Window
                 }
 
                 if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                    ImGui.SetTooltip(Loc.T("Hold Ctrl to remove every step (e.g. before recording again)."));
+                    Theme.Tooltip(Loc.T("Hold Ctrl to remove every step (e.g. before recording again)."));
             }
         }
     }
@@ -377,7 +380,7 @@ public sealed class OpenerEditorWindow : Window
             return;
         }
 
-        using var table = ImRaii.Table("##steps", 6, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingStretchProp);
+        using var table = Theme.Table("##steps", 6, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingStretchProp);
         if (!table)
             return;
 
@@ -409,7 +412,7 @@ public sealed class OpenerEditorWindow : Window
             ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted(name);
             if (step.ActionIds.Count > 1 && ImGui.IsItemHovered())
-                ImGui.SetTooltip(Loc.T("Any of these counts: ") + string.Join(", ", step.ActionIds.Select(a => ActionInfo(a).Name)));
+                Theme.Tooltip(Loc.T("Any of these counts: ") + string.Join(", ", step.ActionIds.Select(a => ActionInfo(a).Name)));
 
             ImGui.TableNextColumn();
             var kind = (int)step.Kind;
@@ -422,14 +425,14 @@ public sealed class OpenerEditorWindow : Window
 
             ImGui.TableNextColumn();
             var before = step.Prepull is not null;
-            if (ImGui.Checkbox("##prepull", ref before))
+            if (Theme.Checkbox("##prepull", ref before))
             {
                 step.Prepull = before ? 1 : null;
                 Changed(opener);
             }
 
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(Loc.T("Used before the pull, this many seconds before it."));
+                Theme.Tooltip(Loc.T("Used before the pull, this many seconds before it."));
 
             if (step.Prepull is { } seconds)
             {
@@ -483,7 +486,7 @@ public sealed class OpenerEditorWindow : Window
     {
         Theme.SectionHeader(Loc.T("Add a step"));
         ImGui.SetNextItemWidth(Theme.Px(240));
-        ImGui.InputTextWithHint("##search", Loc.T("Search an action"), ref search, 64);
+        Theme.InputTextWithHint("##search", Loc.T("Search an action"), ref search, 64);
         ImGui.SameLine();
         if (Theme.GhostButton(Loc.T("Add the tincture")))
         {
@@ -519,7 +522,7 @@ public sealed class OpenerEditorWindow : Window
             if (hovered)
             {
                 ImGui.GetWindowDrawList().AddRect(pos, pos + new Vector2(size, size), Theme.U32(Theme.GoldBright), Theme.Px(4), ImDrawFlags.None, Theme.Px(2));
-                ImGui.SetTooltip(Loc.F("{0} ({1}): click to add it at the end", info.Name, CustomOpeners.IsGcd(id) ? Loc.T("GCD") : Loc.T("oGCD")));
+                Theme.Tooltip(Loc.F("{0} ({1}): click to add it at the end", info.Name, CustomOpeners.IsGcd(id) ? Loc.T("GCD") : Loc.T("oGCD")));
             }
         }
 
